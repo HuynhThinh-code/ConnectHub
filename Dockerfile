@@ -10,6 +10,11 @@ RUN apt-get update && apt-get install -y \
     && docker-php-ext-install gd mysqli pdo pdo_mysql \
     && a2enmod rewrite
 
+# Fix: AH00534: apache2: Configuration error: More than one MPM loaded
+RUN a2dismod mpm_event || true
+RUN a2dismod mpm_worker || true
+RUN a2enmod mpm_prefork || true
+
 # Disable security headers for lab purposes
 RUN echo "ServerTokens Full" >> /etc/apache2/apache2.conf
 RUN echo "expose_php = On" >> /usr/local/etc/php/php.ini
