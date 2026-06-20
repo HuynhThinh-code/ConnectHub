@@ -107,11 +107,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <a href="oauth.php?provider=google" class="btn btn-danger" style="flex: 1;"><i class="fab fa-google"></i> Google</a>
     </div>
     
-    <hr style="border: 0; border-top: 1px solid var(--border); margin: 24px 0 16px;">
-    <!-- VULN: shows default credentials hint -->
-    <div style="text-align: center;">
-        <i class="fas fa-circle-info" style="color: var(--muted); margin-right: 4px;"></i>
-        <small class="text-muted">Demo: admin / admin123 | alice / alice123</small>
-    </div>
 </div>
 <?php require_once 'includes/footer.php'; ?>
