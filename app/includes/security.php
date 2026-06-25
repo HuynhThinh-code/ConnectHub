@@ -439,4 +439,37 @@ function enforce_not_banned($conn) {
         }
     }
 }
+
+function enforce_single_session($conn) {
+    if (empty($_SESSION['user_id'])) return;
+    $uid = (int)$_SESSION['user_id'];
+    $res = $conn->query("SELECT session_token FROM users WHERE id=$uid");
+    if ($res && $res->num_rows > 0) {
+        $user = $res->fetch_assoc();
+        $db_token = $user['session_token'];
+        
+        // If session token is in DB but not in session (e.g. legacy session), sync it
+        if (!isset($_SESSION['session_token']) && !empty($db_token)) {
+            $_SESSION['session_token'] = $db_token;
+        }
+        
+        if (!empty($db_token) && (!isset($_SESSION['session_token']) || $_SESSION['session_token'] !== $db_token)) {
+            log_security_event($conn, 'session_conflict', 'low', 'User logged out due to concurrent login from another device/browser');
+            
+            $_SESSION = [];
+            if (ini_get("session.use_cookies")) {
+                $params = session_get_cookie_params();
+                setcookie(session_name(), '', time() - 42000,
+                    $params["path"], $params["domain"],
+                    $params["secure"], $params["httponly"]
+                );
+            }
+            session_destroy();
+            setcookie('remember_token', '', time()-3600, '/');
+            
+            header('Location: login.php?logged_out_elsewhere=1');
+            exit;
+        }
+    }
+}
 ?>

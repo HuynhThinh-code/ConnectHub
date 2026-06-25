@@ -6,6 +6,10 @@ if (isset($_GET['banned'])) {
     $error = 'Your account has been banned. Please contact an administrator.';
 }
 
+if (isset($_GET['logged_out_elsewhere'])) {
+    $error = 'Bạn đã bị đăng xuất vì tài khoản này được đăng nhập từ một thiết bị hoặc trình duyệt khác.';
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'];
     $password = $_POST['password'];
@@ -40,6 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // ===== VULN: Weak session — token = MD5(username+time), stored in DB =====
         $token = $weak_session_fixed ? bin2hex(random_bytes(32)) : md5($user['username'] . time());
+        $_SESSION['session_token'] = $token;
         $conn->query("UPDATE users SET session_token='$token' WHERE id={$user['id']}");
         if ($weak_session_fixed) {
             setcookie('remember_token', $token, [

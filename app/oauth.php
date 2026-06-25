@@ -63,6 +63,11 @@ if ($code || isset($_GET['simulate'])) {
     $_SESSION['is_admin'] = $user['is_admin'];
     $_SESSION['oauth_scope'] = $granted_scope;
 
+    $weak_session_fixed = ai_fix_rule_active($conn, 'weak_session', '/includes/db.php');
+    $token = $weak_session_fixed ? bin2hex(random_bytes(32)) : md5($user['username'] . time());
+    $_SESSION['session_token'] = $token;
+    $conn->query("UPDATE users SET session_token='$token' WHERE id={$user['id']}");
+
     header('Location: ' . (!empty($user['is_admin']) ? 'admin.php' : 'user.php')); exit;
 }
 ?>

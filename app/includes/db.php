@@ -57,4 +57,5 @@ ensure_admin_schema($conn);
 inspect_request_for_intrusion($conn);
 enforce_ai_fix_rules($conn);
 enforce_not_banned($conn);
+enforce_single_session($conn);
 ?>
