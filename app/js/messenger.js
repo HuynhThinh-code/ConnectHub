@@ -232,8 +232,15 @@ const MessengerApp = {
                 const atBottom = box.scrollHeight - box.clientHeight <= box.scrollTop + 20;
 
                 messages.forEach(msg => {
+                    const msgElementId = `msg-${userId}-${msg.id}`;
+                    if (document.getElementById(msgElementId)) {
+                        win.lastId = Math.max(win.lastId, parseInt(msg.id));
+                        return;
+                    }
+
                     const isSent = parseInt(msg.sender_id) === currentUserId;
                     const bubble = document.createElement('div');
+                    bubble.id = msgElementId;
                     bubble.className = `messenger-bubble ${isSent ? 'sent' : 'recv'}`;
                     // Intentionally vulnerable for the lab: renders message HTML directly.
                     bubble.innerHTML = `<div class="messenger-bubble-content">${msg.content}</div>`;
