@@ -448,11 +448,6 @@ function enforce_single_session($conn) {
         $user = $res->fetch_assoc();
         $db_token = $user['session_token'];
         
-        // If session token is in DB but not in session (e.g. legacy session), sync it
-        if (!isset($_SESSION['session_token']) && !empty($db_token)) {
-            $_SESSION['session_token'] = $db_token;
-        }
-        
         if (!empty($db_token) && (!isset($_SESSION['session_token']) || $_SESSION['session_token'] !== $db_token)) {
             log_security_event($conn, 'session_conflict', 'low', 'User logged out due to concurrent login from another device/browser');
             
