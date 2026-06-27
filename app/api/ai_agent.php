@@ -125,8 +125,8 @@ If you want to suggest a direct source code hotpatch, you MUST format it exactly
 
 Make sure the [SEARCH] block matches the vulnerable code EXACTLY, including indentation. Keep the patches clean, correct, and robust. Always explain what the vulnerability was and how your patch remediates it.";
 
-    // Call Gemini API (1.5 Flash)
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" . $apiKey;
+    // Call Gemini API (3.5 Flash)
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=" . $apiKey;
     
     $data = [
         'contents' => [
