@@ -500,7 +500,6 @@ $ai_fix_rules = $conn->query("
 
             <!-- Floating Chat Widget Styles -->
             <style>
-                /* Widget Floating Toggle Button */
                 .floating-ai-toggle {
                     position: fixed;
                     bottom: 24px;
@@ -517,11 +516,10 @@ $ai_fix_rules = $conn->query("
                     font-size: 24px;
                     cursor: pointer;
                     z-index: 9999;
-                    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                    transition: box-shadow 0.3s ease;
                 }
                 .floating-ai-toggle:hover {
-                    transform: scale(1.1) rotate(5deg);
-                    box-shadow: 0 12px 35px rgba(79, 70, 229, 0.5);
+                    box-shadow: 0 12px 35px rgba(79, 70, 229, 0.6);
                 }
                 .floating-ai-toggle .pulse {
                     position: absolute;
@@ -778,54 +776,8 @@ $ai_fix_rules = $conn->query("
                     background: #059669;
                 }
             </style>
+            <!-- Chat widget elements moved outside grid container to prevent overflow clipping -->
 
-            <!-- Floating Toggle Trigger Button -->
-            <div class="floating-ai-toggle" id="floatingAiToggle">
-                <span class="pulse"></span>
-                <i class="fas fa-robot"></i>
-            </div>
-
-            <!-- Floating AI Chat Widget -->
-            <div class="ai-chat-widget" id="aiChatWidget">
-                <div class="ai-chat-header">
-                    <div class="ai-chat-header-title">
-                        <i class="fas fa-shield-halved text-primary-light"></i>
-                        <span>Gemini Security Agent</span>
-                    </div>
-                    <div class="ai-chat-header-actions">
-                        <button class="ai-chat-header-btn" id="aiSettingsToggle" title="Settings">
-                            <i class="fas fa-cog"></i>
-                        </button>
-                        <button class="ai-chat-header-btn" id="aiChatCollapse" title="Minimize">
-                            <i class="fas fa-minus"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- API Key Configuration Settings Panel -->
-                <div class="ai-settings-panel" id="aiSettingsPanel">
-                    <h4 style="margin: 0 0 10px 0;"><i class="fas fa-key"></i> Gemini API Key</h4>
-                    <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">Get a Gemini API Key from Google AI Studio and save it here.</p>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="password" id="geminiApiKeyInput" class="form-control" placeholder="AIzaSy..." style="flex:1;">
-                        <button id="saveApiKeyBtn" class="btn btn-primary btn-sm">Save</button>
-                    </div>
-                    <div id="apiKeyStatus" style="font-size: 0.8rem; margin-top: 8px; font-weight: 500;">Checking Key status...</div>
-                </div>
-
-                <!-- Chats History -->
-                <div class="ai-chat-messages-area" id="aiChatMessages">
-                    <div class="ai-bubble bot">
-                        <strong>Gemini Agent:</strong> Xin chào! Tôi là AI Agent bảo mật. Tôi có thể giúp bạn vá các lỗ hổng (SQLi, XSS, SSRF, Command Injection...) trực tiếp trên Lab này. Hãy hỏi tôi hoặc bấm nút <strong>AI Fix</strong> ở các sự kiện tấn công phát hiện được.
-                    </div>
-                </div>
-
-                <!-- Input area -->
-                <div class="ai-chat-input-bar">
-                    <input type="text" id="aiChatInput" placeholder="Hỏi cách fix lỗi hoặc nhập câu hỏi...">
-                    <button id="aiChatSend"><i class="fas fa-paper-plane"></i></button>
-                </div>
-            </div>
 
             <!-- Client Script Controller -->
             <script>
@@ -1207,4 +1159,53 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
         </div>
     </section>
 </div>
+
+<!-- Floating Toggle Trigger Button -->
+<div class="floating-ai-toggle" id="floatingAiToggle">
+    <span class="pulse"></span>
+    <i class="fas fa-robot"></i>
+</div>
+
+<!-- Floating AI Chat Widget -->
+<div class="ai-chat-widget" id="aiChatWidget">
+    <div class="ai-chat-header">
+        <div class="ai-chat-header-title">
+            <i class="fas fa-shield-halved text-primary-light"></i>
+            <span>Gemini Security Agent</span>
+        </div>
+        <div class="ai-chat-header-actions">
+            <button class="ai-chat-header-btn" id="aiSettingsToggle" title="Settings">
+                <i class="fas fa-cog"></i>
+            </button>
+            <button class="ai-chat-header-btn" id="aiChatCollapse" title="Minimize">
+                <i class="fas fa-minus"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- API Key Configuration Settings Panel -->
+    <div class="ai-settings-panel" id="aiSettingsPanel">
+        <h4 style="margin: 0 0 10px 0;"><i class="fas fa-key"></i> Gemini API Key</h4>
+        <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">Get a Gemini API Key from Google AI Studio and save it here.</p>
+        <div style="display: flex; gap: 8px;">
+            <input type="password" id="geminiApiKeyInput" class="form-control" placeholder="AIzaSy..." style="flex:1;">
+            <button id="saveApiKeyBtn" class="btn btn-primary btn-sm">Save</button>
+        </div>
+        <div id="apiKeyStatus" style="font-size: 0.8rem; margin-top: 8px; font-weight: 500;">Checking Key status...</div>
+    </div>
+
+    <!-- Chats History -->
+    <div class="ai-chat-messages-area" id="aiChatMessages">
+        <div class="ai-bubble bot">
+            <strong>Gemini Agent:</strong> Xin chào! Tôi là AI Agent bảo mật. Tôi có thể giúp bạn vá các lỗ hổng (SQLi, XSS, SSRF, Command Injection...) trực tiếp trên Lab này. Hãy hỏi tôi hoặc bấm nút <strong>AI Fix</strong> ở các sự kiện tấn công phát hiện được.
+        </div>
+    </div>
+
+    <!-- Input area -->
+    <div class="ai-chat-input-bar">
+        <input type="text" id="aiChatInput" placeholder="Hỏi cách fix lỗi hoặc nhập câu hỏi...">
+        <button id="aiChatSend"><i class="fas fa-paper-plane"></i></button>
+    </div>
+</div>
+
 <?php require_once 'includes/footer.php'; ?>
