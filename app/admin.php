@@ -489,93 +489,600 @@ $ai_fix_rules = $conn->query("
             <span>Server timezone: Asia/Ho_Chi_Minh (UTC+7)</span>
         </div>
         <div class="security-dashboard-grid">
-            <section class="security-panel security-panel-wide">
+            <section class="security-panel security-panel-wide" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                     <h3 style="margin: 0;"><i class="fas fa-robot"></i> AI Fix Assistant</h3>
                     <form method="POST" style="margin: 0;">
                         <button name="action" value="train_ai_fix_all" class="btn btn-success btn-sm"><i class="fas fa-brain"></i> Train AI Fix All</button>
                     </form>
                 </div>
-                <p class="text-muted">Trò chuyện với AI để tìm hiểu cách vá các lỗ hổng bảo mật được liệt kê trong README.</p>
+            </section>
 
-                <!-- Chat UI -->
-                <div class="ai-chat-container" style="border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; height: 400px; background: var(--bg-color); margin-top: 16px;">
-                    <div id="chat-messages" style="flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;">
-                        <div class="chat-message bot" style="align-self: flex-start; background: var(--primary-light); color: var(--text-dark); padding: 10px 14px; border-radius: 12px; max-width: 80%;">
-                            <strong><i class="fas fa-robot"></i> AI:</strong> Xin chào! Tôi là AI Fix Assistant. Bạn có thể hỏi tôi về cách vá các lỗ hổng bảo mật trong bài Lab này (ví dụ: SQL Injection, XSS, SSRF, Command Injection, IDOR...). Tôi có thể giúp gì cho bạn?
-                        </div>
+            <!-- Floating Chat Widget Styles -->
+            <style>
+                /* Widget Floating Toggle Button */
+                .floating-ai-toggle {
+                    position: fixed;
+                    bottom: 24px;
+                    right: 24px;
+                    width: 60px;
+                    height: 60px;
+                    background: linear-gradient(135deg, #6366f1, #4f46e5);
+                    border-radius: 50%;
+                    box-shadow: 0 8px 30px rgba(79, 70, 229, 0.4);
+                    color: #fff;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    font-size: 24px;
+                    cursor: pointer;
+                    z-index: 9999;
+                    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                }
+                .floating-ai-toggle:hover {
+                    transform: scale(1.1) rotate(5deg);
+                    box-shadow: 0 12px 35px rgba(79, 70, 229, 0.5);
+                }
+                .floating-ai-toggle .pulse {
+                    position: absolute;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(79, 70, 229, 0.4);
+                    border-radius: 50%;
+                    animation: pulse-ring 2s infinite;
+                    z-index: -1;
+                }
+                @keyframes pulse-ring {
+                    0% { transform: scale(0.95); opacity: 0.8; }
+                    50% { transform: scale(1.3); opacity: 0; }
+                    100% { transform: scale(0.95); opacity: 0; }
+                }
+
+                /* Floating Chatbox Container */
+                .ai-chat-widget {
+                    position: fixed;
+                    bottom: 96px;
+                    right: 24px;
+                    width: 420px;
+                    height: 600px;
+                    background: rgba(255, 255, 255, 0.85);
+                    backdrop-filter: blur(20px) saturate(180%);
+                    -webkit-backdrop-filter: blur(20px) saturate(180%);
+                    border: 1px solid rgba(209, 213, 219, 0.3);
+                    border-radius: 20px;
+                    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+                    display: flex;
+                    flex-direction: column;
+                    z-index: 9998;
+                    overflow: hidden;
+                    opacity: 0;
+                    transform: translateY(30px) scale(0.95);
+                    pointer-events: none;
+                    transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+                }
+                .ai-chat-widget.active {
+                    opacity: 1;
+                    transform: translateY(0) scale(1);
+                    pointer-events: auto;
+                }
+
+                /* Header */
+                .ai-chat-header {
+                    background: linear-gradient(135deg, #1e1b4b, #312e81);
+                    color: #fff;
+                    padding: 16px 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                }
+                .ai-chat-header-title {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    font-weight: 600;
+                    font-size: 1.05rem;
+                }
+                .ai-chat-header-actions {
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                }
+                .ai-chat-header-btn {
+                    background: transparent;
+                    border: none;
+                    color: rgba(255, 255, 255, 0.8);
+                    cursor: pointer;
+                    font-size: 1.1rem;
+                    transition: color 0.2s;
+                }
+                .ai-chat-header-btn:hover {
+                    color: #fff;
+                }
+
+                /* Message Area */
+                .ai-chat-messages-area {
+                    flex: 1;
+                    padding: 20px;
+                    overflow-y: auto;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 16px;
+                }
+                .ai-bubble {
+                    max-width: 85%;
+                    padding: 12px 16px;
+                    border-radius: 16px;
+                    font-size: 0.95rem;
+                    line-height: 1.5;
+                    word-wrap: break-word;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+                }
+                .ai-bubble.bot {
+                    align-self: flex-start;
+                    background: #f3f4f6;
+                    color: #1f2937;
+                    border-top-left-radius: 4px;
+                }
+                .ai-bubble.user {
+                    align-self: flex-end;
+                    background: #4f46e5;
+                    color: #fff;
+                    border-top-right-radius: 4px;
+                }
+                .ai-bubble code {
+                    background: rgba(0,0,0,0.06);
+                    padding: 2px 5px;
+                    border-radius: 4px;
+                    font-family: Consolas, monospace;
+                    font-size: 0.85rem;
+                }
+                .ai-bubble.user code {
+                    background: rgba(255,255,255,0.2);
+                }
+                .ai-bubble pre {
+                    background: #1e293b;
+                    color: #f8fafc;
+                    padding: 12px;
+                    border-radius: 8px;
+                    overflow-x: auto;
+                    margin: 8px 0;
+                }
+                .ai-bubble pre code {
+                    background: transparent;
+                    color: inherit;
+                    padding: 0;
+                }
+
+                /* Typing Indicator */
+                .typing-indicator {
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                }
+                .typing-indicator span {
+                    width: 6px;
+                    height: 6px;
+                    background: #9ca3af;
+                    border-radius: 50%;
+                    display: inline-block;
+                    animation: bounce 1.4s infinite ease-in-out both;
+                }
+                .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+                .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+                @keyframes bounce {
+                    0%, 80%, 100% { transform: scale(0); }
+                    40% { transform: scale(1); }
+                }
+
+                /* Settings Overlay Panel */
+                .ai-settings-panel {
+                    position: absolute;
+                    top: 60px;
+                    left: 0;
+                    right: 0;
+                    background: #fff;
+                    border-bottom: 1px solid #e5e7eb;
+                    padding: 20px;
+                    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+                    transform: translateY(-100%);
+                    opacity: 0;
+                    pointer-events: none;
+                    transition: all 0.3s ease;
+                    z-index: 10;
+                }
+                .ai-settings-panel.active {
+                    transform: translateY(0);
+                    opacity: 1;
+                    pointer-events: auto;
+                }
+
+                /* Input Bar */
+                .ai-chat-input-bar {
+                    border-top: 1px solid rgba(229, 231, 235, 0.6);
+                    padding: 16px;
+                    display: flex;
+                    gap: 10px;
+                    background: rgba(249, 250, 251, 0.8);
+                }
+                .ai-chat-input-bar input {
+                    flex: 1;
+                    border: 1px solid #d1d5db;
+                    border-radius: 24px;
+                    padding: 10px 18px;
+                    outline: none;
+                    font-size: 0.95rem;
+                    background: #fff;
+                    transition: border-color 0.2s;
+                }
+                .ai-chat-input-bar input:focus {
+                    border-color: #6366f1;
+                }
+                .ai-chat-input-bar button {
+                    background: #4f46e5;
+                    color: #fff;
+                    border: none;
+                    border-radius: 50%;
+                    width: 42px;
+                    height: 42px;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    cursor: pointer;
+                    transition: background 0.2s;
+                }
+                .ai-chat-input-bar button:hover {
+                    background: #4338ca;
+                }
+
+                /* Interactive Patch Card */
+                .patch-card {
+                    background: #fff;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 12px;
+                    margin-top: 12px;
+                    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+                    overflow: hidden;
+                }
+                .patch-card-header {
+                    background: #f9fafb;
+                    padding: 10px 14px;
+                    border-bottom: 1px solid #e5e7eb;
+                    font-weight: 600;
+                    font-size: 0.85rem;
+                    color: #374151;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                .patch-card-body {
+                    padding: 12px;
+                    max-height: 150px;
+                    overflow-y: auto;
+                }
+                .patch-card-btn {
+                    width: 100%;
+                    border: none;
+                    background: #10b981;
+                    color: #fff;
+                    font-weight: 600;
+                    font-size: 0.9rem;
+                    padding: 10px;
+                    cursor: pointer;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    gap: 8px;
+                    transition: background 0.2s;
+                }
+                .patch-card-btn:hover {
+                    background: #059669;
+                }
+            </style>
+
+            <!-- Floating Toggle Trigger Button -->
+            <div class="floating-ai-toggle" id="floatingAiToggle">
+                <span class="pulse"></span>
+                <i class="fas fa-robot"></i>
+            </div>
+
+            <!-- Floating AI Chat Widget -->
+            <div class="ai-chat-widget" id="aiChatWidget">
+                <div class="ai-chat-header">
+                    <div class="ai-chat-header-title">
+                        <i class="fas fa-shield-halved text-primary-light"></i>
+                        <span>Gemini Security Agent</span>
                     </div>
-                    <div class="chat-input-area" style="display: flex; border-top: 1px solid var(--border); padding: 12px; background: var(--bg-light); border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;">
-                        <input type="text" id="chat-input" class="form-control" placeholder="Hỏi cách fix lỗi (VD: làm sao để fix XSS?)..." style="flex: 1; border-radius: 20px; padding: 8px 16px; border: 1px solid var(--border);">
-                        <button id="chat-send" class="btn btn-primary" style="border-radius: 20px; margin-left: 8px; padding: 8px 16px;"><i class="fas fa-paper-plane"></i></button>
+                    <div class="ai-chat-header-actions">
+                        <button class="ai-chat-header-btn" id="aiSettingsToggle" title="Settings">
+                            <i class="fas fa-cog"></i>
+                        </button>
+                        <button class="ai-chat-header-btn" id="aiChatCollapse" title="Minimize">
+                            <i class="fas fa-minus"></i>
+                        </button>
                     </div>
                 </div>
 
-                <script>
+                <!-- API Key Configuration Settings Panel -->
+                <div class="ai-settings-panel" id="aiSettingsPanel">
+                    <h4 style="margin: 0 0 10px 0;"><i class="fas fa-key"></i> Gemini API Key</h4>
+                    <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">Get a Gemini API Key from Google AI Studio and save it here.</p>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="geminiApiKeyInput" class="form-control" placeholder="AIzaSy..." style="flex:1;">
+                        <button id="saveApiKeyBtn" class="btn btn-primary btn-sm">Save</button>
+                    </div>
+                    <div id="apiKeyStatus" style="font-size: 0.8rem; margin-top: 8px; font-weight: 500;">Checking Key status...</div>
+                </div>
+
+                <!-- Chats History -->
+                <div class="ai-chat-messages-area" id="aiChatMessages">
+                    <div class="ai-bubble bot">
+                        <strong>Gemini Agent:</strong> Xin chào! Tôi là AI Agent bảo mật. Tôi có thể giúp bạn vá các lỗ hổng (SQLi, XSS, SSRF, Command Injection...) trực tiếp trên Lab này. Hãy hỏi tôi hoặc bấm nút <strong>AI Fix</strong> ở các sự kiện tấn công phát hiện được.
+                    </div>
+                </div>
+
+                <!-- Input area -->
+                <div class="ai-chat-input-bar">
+                    <input type="text" id="aiChatInput" placeholder="Hỏi cách fix lỗi hoặc nhập câu hỏi...">
+                    <button id="aiChatSend"><i class="fas fa-paper-plane"></i></button>
+                </div>
+            </div>
+
+            <!-- Client Script Controller -->
+            <script>
                 document.addEventListener('DOMContentLoaded', function() {
-                    const input = document.getElementById('chat-input');
-                    const sendBtn = document.getElementById('chat-send');
-                    const messages = document.getElementById('chat-messages');
+                    const toggle = document.getElementById('floatingAiToggle');
+                    const widget = document.getElementById('aiChatWidget');
+                    const collapse = document.getElementById('aiChatCollapse');
+                    const settingsToggle = document.getElementById('aiSettingsToggle');
+                    const settingsPanel = document.getElementById('aiSettingsPanel');
+                    const saveKeyBtn = document.getElementById('saveApiKeyBtn');
+                    const apiKeyInput = document.getElementById('geminiApiKeyInput');
+                    const keyStatus = document.getElementById('apiKeyStatus');
+                    const chatMessages = document.getElementById('aiChatMessages');
+                    const chatInput = document.getElementById('aiChatInput');
+                    const sendBtn = document.getElementById('aiChatSend');
 
-                    const fixKnowledge = {
-                        'sql': 'Để fix **SQL Injection**: Bạn nên sử dụng Prepared Statements (ví dụ: `$stmt = $conn->prepare()`) thay vì nối chuỗi trực tiếp vào câu lệnh SQL. Đồng thời, hãy ép kiểu (type casting) các biến đầu vào cho đúng đắn.',
-                        'xss': 'Để fix **XSS**: Bạn cần gọi hàm `htmlspecialchars($input, ENT_QUOTES, \'UTF-8\')` khi in bất kỳ dữ liệu nào do người dùng nhập ra màn hình HTML. Đối với dữ liệu cần giữ lại HTML (Rich Text), hãy dùng thư viện như HTMLPurifier.',
-                        'command': 'Để fix **Command Injection**: Không bao giờ ghép chuỗi đầu vào thẳng vào các hàm như `shell_exec()`. Nếu thực sự cần, hãy dùng `escapeshellarg()` hoặc cấu hình whitelist cho các tham số hợp lệ.',
-                        'ssrf': 'Để fix **SSRF**: Bạn cần kiểm tra URL mục tiêu trước khi fetch: chỉ cho phép `http/https`, kiểm tra domain có nằm trong whitelist không, và đảm bảo IP giải mã ra không thuộc dải mạng nội bộ (127.0.0.1, 10.x.x.x).',
-                        'idor': 'Để fix **IDOR / Private Disclosure**: Trong các câu truy vấn cơ sở dữ liệu, hãy luôn thêm điều kiện kiểm tra chủ sở hữu: `WHERE user_id = $_SESSION["user_id"]`. Không bao giờ tin tưởng tham số ID truyền từ URL mà không có bước Authorization.',
-                        'session': 'Để fix **Weak Session / Hijacking**: Hãy set cờ `HttpOnly` và `Secure` cho session cookie trong PHP. Khi thiết kế chức năng "Remember me", hãy sinh token ngẫu nhiên bằng `random_bytes()` thay vì hash đơn giản.',
-                        'avatar': 'Để fix **Avatar Upload Bypass**: Hãy dùng hàm `finfo_file()` để kiểm tra MIME type thực sự của file (không tin tưởng đuôi file gửi từ client). Từ chối mọi file không phải là ảnh và nhớ đổi tên file thành chuỗi ngẫu nhiên khi lưu.',
-                        'oauth': 'Để fix **OAuth Scope Escalation**: Hãy lưu danh sách scope được phép ở phía Backend. Đừng lấy tham số `scope` từ Client gửi lên form. Bổ sung thêm tham số `state` để chống CSRF.'
-                    };
+                    let activePatch = null;
 
-                    function appendMessage(text, isUser) {
-                        const msg = document.createElement('div');
-                        msg.style.alignSelf = isUser ? 'flex-end' : 'flex-start';
-                        msg.style.background = isUser ? 'var(--primary)' : 'var(--primary-light)';
-                        msg.style.color = isUser ? '#fff' : 'var(--text-dark)';
-                        msg.style.padding = '10px 14px';
-                        msg.style.borderRadius = '12px';
-                        msg.style.maxWidth = '80%';
-                        msg.style.lineHeight = '1.5';
-                        msg.innerHTML = (isUser ? '<strong>Bạn:</strong> ' : '<strong><i class="fas fa-robot"></i> AI:</strong> ') + text.replace(/\n/g, '<br>');
-                        messages.appendChild(msg);
-                        messages.scrollTop = messages.scrollHeight;
-                    }
+                    // Toggle chat window open/close
+                    toggle.addEventListener('click', () => {
+                        widget.classList.toggle('active');
+                    });
+                    collapse.addEventListener('click', () => {
+                        widget.classList.remove('active');
+                    });
 
-                    function handleSend() {
-                        const text = input.value.trim();
-                        if (!text) return;
-                        appendMessage(text, true);
-                        input.value = '';
+                    // Toggle settings overlay
+                    settingsToggle.addEventListener('click', () => {
+                        settingsPanel.classList.toggle('active');
+                    });
 
-                        const typing = document.createElement('div');
-                        typing.style.alignSelf = 'flex-start';
-                        typing.style.color = 'var(--muted)';
-                        typing.style.fontSize = '0.9rem';
-                        typing.innerHTML = '<em>AI đang gõ...</em>';
-                        messages.appendChild(typing);
-                        messages.scrollTop = messages.scrollHeight;
-
-                        setTimeout(() => {
-                            messages.removeChild(typing);
-                            const lowerText = text.toLowerCase();
-                            let response = "Xin lỗi, tôi chỉ tập trung hỗ trợ hướng dẫn vá các lỗ hổng có trong README của Lab này. Bạn có thể hỏi tôi chi tiết về: SQL, XSS, SSRF, Command Injection, IDOR, Session, Avatar Bypass, hoặc OAuth.";
-
-                            for (const [key, fix] of Object.entries(fixKnowledge)) {
-                                if (lowerText.includes(key)) {
-                                    response = fix;
-                                    break;
-                                }
+                    // Load API Key configuration status
+                    function loadApiKeyStatus() {
+                        fetch('api/ai_agent.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'get_key_status' })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.configured) {
+                                keyStatus.innerHTML = '<span style="color:#10b981;"><i class="fas fa-check-circle"></i> Key Active: ' + data.masked_key + '</span>';
+                            } else {
+                                keyStatus.innerHTML = '<span style="color:#ef4444;"><i class="fas fa-exclamation-circle"></i> API Key Not Configured</span>';
                             }
-                            appendMessage(response, false);
-                        }, 600);
+                        });
+                    }
+                    loadApiKeyStatus();
+
+                    // Save new API Key
+                    saveKeyBtn.addEventListener('click', () => {
+                        const key = apiKeyInput.value.trim();
+                        if (!key) return;
+                        saveKeyBtn.disabled = true;
+                        fetch('api/ai_agent.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'save_key', key: key })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            saveKeyBtn.disabled = false;
+                            if (data.success) {
+                                apiKeyInput.value = '';
+                                settingsPanel.classList.remove('active');
+                                loadApiKeyStatus();
+                                appendMessage('bot', '✔️ Đã lưu API Key thành công! Tôi đã sẵn sàng hoạt động.');
+                            } else {
+                                alert(data.error || 'Failed to save key.');
+                            }
+                        })
+                        .catch(() => {
+                            saveKeyBtn.disabled = false;
+                        });
+                    });
+
+                    // Append chat bubbles
+                    function appendMessage(sender, text) {
+                        const bubble = document.createElement('div');
+                        bubble.className = 'ai-bubble ' + sender;
+                        
+                        if (sender === 'bot') {
+                            // Simple Markdown rendering helper (supports code blocks and paragraph breaks)
+                            let parsed = text;
+                            
+                            // Detect patch blocks
+                            const patchRegex = /```patch\s*([\s\S]*?)```/g;
+                            let patchMatch;
+                            let patchCardHtml = '';
+                            
+                            if (patchMatch = patchRegex.exec(text)) {
+                                const patchBlock = patchMatch[1];
+                                const lines = patchBlock.split('\n');
+                                let filePath = '';
+                                let searchCode = [];
+                                let replaceCode = [];
+                                let mode = ''; // 'search' or 'replace'
+
+                                lines.forEach(line => {
+                                    if (line.startsWith('[PATCH]')) {
+                                        filePath = line.replace('[PATCH] file_path:', '').trim();
+                                    } else if (line.startsWith('[SEARCH]')) {
+                                        mode = 'search';
+                                    } else if (line.startsWith('[REPLACE]')) {
+                                        mode = 'replace';
+                                    } else {
+                                        if (mode === 'search') searchCode.push(line);
+                                        if (mode === 'replace') replaceCode.push(line);
+                                    }
+                                });
+
+                                activePatch = {
+                                    file_path: filePath,
+                                    search_code: searchCode.join('\n'),
+                                    replace_code: replaceCode.join('\n')
+                                };
+
+                                patchCardHtml = `
+                                    <div class="patch-card">
+                                        <div class="patch-card-header">
+                                            <span><i class="fas fa-file-code"></i> ${escapeHtml(filePath)}</span>
+                                            <span style="color:#ef4444; font-size:0.75rem;">Source Hotpatch</span>
+                                        </div>
+                                        <div class="patch-card-body">
+                                            <pre style="margin:0; font-size:0.8rem;"><code>${escapeHtml(activePatch.replace_code.substring(0, 100))}${activePatch.replace_code.length > 100 ? '...' : ''}</code></pre>
+                                        </div>
+                                        <button class="patch-card-btn" id="applyPatchBtn">
+                                            <i class="fas fa-wand-magic-sparkles"></i> Apply Source Patch
+                                        </button>
+                                    </div>
+                                `;
+                            }
+
+                            // Render basic pre blocks
+                            parsed = parsed.replace(/```(\w+)?([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+                            parsed = parsed.replace(/`([^`]+)`/g, '<code>$1</code>');
+                            parsed = parsed.replace(/\n/g, '<br>');
+                            
+                            bubble.innerHTML = '<strong>Gemini Agent:</strong><br>' + parsed + patchCardHtml;
+                        } else {
+                            bubble.innerHTML = '<strong>Bạn:</strong><br>' + escapeHtml(text).replace(/\n/g, '<br>');
+                        }
+                        
+                        chatMessages.appendChild(bubble);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                        // Attach trigger for Applying Patch button
+                        const applyBtn = document.getElementById('applyPatchBtn');
+                        if (applyBtn && activePatch) {
+                            applyBtn.addEventListener('click', function() {
+                                applyBtn.disabled = true;
+                                applyBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Patching file...';
+                                applyPatchDirect(applyBtn);
+                            });
+                        }
                     }
 
-                    sendBtn.addEventListener('click', handleSend);
-                    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSend(); });
+                    function escapeHtml(str) {
+                        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                    }
+
+                    // Apply source patch helper
+                    function applyPatchDirect(btn) {
+                        if (!activePatch) return;
+                        fetch('api/ai_agent.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                action: 'apply_patch',
+                                file_path: activePatch.file_path,
+                                search_code: activePatch.search_code,
+                                replace_code: activePatch.replace_code
+                            })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                btn.style.background = '#10b981';
+                                btn.innerHTML = '<i class="fas fa-check-double"></i> Patched Successfully!';
+                                appendMessage('bot', '✔️ ' + data.message);
+                                activePatch = null;
+                            } else {
+                                btn.style.background = '#ef4444';
+                                btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> Patch Failed';
+                                appendMessage('bot', '❌ Thất bại: ' + data.error);
+                            }
+                        })
+                        .catch(err => {
+                            btn.style.background = '#ef4444';
+                            btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> Connection Error';
+                            appendMessage('bot', '❌ Lỗi kết nối khi vá: ' + err.message);
+                        });
+                    }
+
+                    // Send normal chat message
+                    function handleChatSend(overrideMessage = null) {
+                        const message = overrideMessage || chatInput.value.trim();
+                        if (!message) return;
+                        
+                        if (!overrideMessage) {
+                            appendMessage('user', message);
+                            chatInput.value = '';
+                        }
+
+                        // Add typing bubble
+                        const typing = document.createElement('div');
+                        typing.className = 'ai-bubble bot';
+                        typing.innerHTML = `
+                            <strong>Gemini Agent:</strong><br>
+                            <div class="typing-indicator">
+                                <span></span><span></span><span></span>
+                            </div>
+                        `;
+                        chatMessages.appendChild(typing);
+                        chatMessages.scrollTop = chatMessages.scrollHeight;
+
+                        fetch('api/ai_agent.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'chat', message: message })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            chatMessages.removeChild(typing);
+                            if (data.reply) {
+                                appendMessage('bot', data.reply);
+                            } else {
+                                appendMessage('bot', '⚠️ Lỗi: ' + (data.error || 'Unknown response.'));
+                            }
+                        })
+                        .catch(err => {
+                            chatMessages.removeChild(typing);
+                            appendMessage('bot', '❌ Lỗi kết nối API: ' + err.message);
+                        });
+                    }
+
+                    sendBtn.addEventListener('click', () => handleChatSend());
+                    chatInput.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') handleChatSend();
+                    });
+
+                    // Modify the default "AI Fix" click buttons on the events panel
+                    window.triggerAiFixForEvent = function(eventType, route, details, payload) {
+                        widget.classList.add('active');
+                        appendMessage('user', `Hỏi cách vá lỗ hổng loại "${eventType}" tại route "${route}"`);
+                        
+                        const queryMessage = `Vui lòng phân tích sự cố bảo mật này và đề xuất một bản vá hotpatch bằng cách sử dụng cấu trúc [PATCH]:
+Loại sự kiện: ${eventType}
+Route: ${route}
+Chi tiết: ${details}
+Payload ghi nhận: ${payload}
+Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp cấu trúc code [PATCH] chuẩn xác để tôi bấm nút vá lỗi trực tiếp.`;
+                        
+                        handleChatSend(queryMessage);
+                    };
                 });
-                </script>
-            </section>
+            </script>
 
             <section class="security-panel">
                 <h3><i class="fas fa-right-to-bracket"></i> Login Activity</h3>
@@ -632,25 +1139,30 @@ $ai_fix_rules = $conn->query("
                             <p><?= htmlspecialchars($event['details']) ?></p>
                             <?php if ($event['request_uri']): ?><code>URL: <?= htmlspecialchars(substr($event['request_uri'], 0, 220)) ?></code><?php endif; ?>
                             <code>Payload: <?= htmlspecialchars(admin_event_payload($event['payload'])) ?></code>
-                            <?php if ($event['ai_fixed_at']): ?>
-                                <div class="ai-fix-summary">
-                                    <strong><i class="fas fa-wand-magic-sparkles"></i> AI Fix applied at <?= htmlspecialchars(admin_event_time($event['ai_fixed_at'])) ?></strong>
-                                    <p><?= htmlspecialchars($event['ai_fix_summary']) ?></p>
-                                    <small>Protection source: <a href="<?= htmlspecialchars(ai_security_source_url()) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(ai_security_source_name()) ?></a></small>
-                                </div>
-                            <?php elseif (!$event['resolved_at']): ?>
-                                <form method="POST" class="security-event-actions">
-                                    <input type="hidden" name="id" value="<?= (int)$event['id'] ?>">
-                                    <button name="action" value="ai_fix_event" class="btn btn-success btn-sm"><i class="fas fa-wand-magic-sparkles"></i> AI Fix</button>
-                                    <button name="action" value="resolve_event" class="btn btn-secondary btn-sm"><i class="fas fa-check-double"></i> Mark reviewed</button>
-                                </form>
-                            <?php else: ?>
-                                <form method="POST" class="security-event-actions">
-                                    <input type="hidden" name="id" value="<?= (int)$event['id'] ?>">
-                                    <button name="action" value="ai_fix_event" class="btn btn-success btn-sm"><i class="fas fa-wand-magic-sparkles"></i> AI Fix</button>
-                                    <small class="text-muted">Reviewed at <?= htmlspecialchars(admin_event_time($event['resolved_at'])) ?></small>
-                                </form>
-                            <?php endif; ?>
+                             <?php if ($event['ai_fixed_at']): ?>
+                                 <div class="ai-fix-summary">
+                                     <strong><i class="fas fa-wand-magic-sparkles"></i> AI Fix applied at <?= htmlspecialchars(admin_event_time($event['ai_fixed_at'])) ?></strong>
+                                     <p><?= htmlspecialchars($event['ai_fix_summary']) ?></p>
+                                     <small>Protection source: <a href="<?= htmlspecialchars(ai_security_source_url()) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(ai_security_source_name()) ?></a></small>
+                                 </div>
+                             <?php elseif (!$event['resolved_at']): ?>
+                                 <div class="security-event-actions">
+                                     <button type="button" class="btn btn-success btn-sm" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
+                                         <i class="fas fa-wand-magic-sparkles"></i> AI Fix
+                                     </button>
+                                     <form method="POST" style="display:inline;">
+                                         <input type="hidden" name="id" value="<?= (int)$event['id'] ?>">
+                                         <button name="action" value="resolve_event" class="btn btn-secondary btn-sm"><i class="fas fa-check-double"></i> Mark reviewed</button>
+                                     </form>
+                                 </div>
+                             <?php else: ?>
+                                 <div class="security-event-actions">
+                                     <button type="button" class="btn btn-success btn-sm" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
+                                         <i class="fas fa-wand-magic-sparkles"></i> AI Fix
+                                     </button>
+                                     <small class="text-muted">Reviewed at <?= htmlspecialchars(admin_event_time($event['resolved_at'])) ?></small>
+                                 </div>
+                             <?php endif; ?>
                         </article>
                         <?php endforeach; ?>
                     </div>
