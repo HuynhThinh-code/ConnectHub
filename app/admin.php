@@ -289,6 +289,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $error = 'Failed to unblock IP due to database error.';
             }
         }
+    } elseif ($action === 'reset_security_data') {
+        $conn->query("TRUNCATE TABLE ai_fix_rules");
+        $conn->query("TRUNCATE TABLE security_events");
+        $conn->query("TRUNCATE TABLE blocked_ips");
+        $conn->query("UPDATE posts SET status='approved', moderation_note=NULL, moderated_by=NULL, moderated_at=NULL");
+        $conn->query("UPDATE users SET is_banned=0, ban_reason=NULL, banned_at=NULL");
+        
+        // Scan for .bak files and restore the original code files
+        $basePath = realpath(__DIR__);
+        if ($basePath) {
+            $files = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($basePath),
+                RecursiveIteratorIterator::LEAVES_ONLY
+            );
+            foreach ($files as $file) {
+                if ($file->isFile() && $file->getExtension() === 'bak') {
+                    $originalFile = substr($file->getPathname(), 0, -4);
+                    if (file_exists($originalFile)) {
+                        copy($file->getPathname(), $originalFile);
+                    }
+                    unlink($file->getPathname());
+                }
+            }
+        }
+        
+        log_security_event($conn, 'lab_reset', 'medium', 'Admin reset the lab security state to default.');
+        $message = 'Lab security database and code patches have been successfully reset to default.';
     }
 }
 
@@ -528,7 +555,12 @@ $ai_fix_rules = $conn->query("
     <section class="card admin-section" id="security">
         <div class="section-heading">
             <h2><i class="fas fa-shield-halved"></i> Intrusion Detection</h2>
-            <span>Server timezone: Asia/Ho_Chi_Minh (UTC+7)</span>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <form method="POST" style="margin: 0;" onsubmit="return confirm('WARNING: This will clear all AI fix rules, delete security logs, delete blocked IPs, and restore all original vulnerable files. Are you sure you want to reset the lab?')">
+                    <button name="action" value="reset_security_data" class="btn btn-outline-danger btn-sm"><i class="fas fa-rotate-left"></i> Reset Lab State</button>
+                </form>
+                <span style="font-size: 0.85rem; color: var(--text-muted);">Server timezone: Asia/Ho_Chi_Minh (UTC+7)</span>
+            </div>
         </div>
         <div class="security-dashboard-grid">
             <section class="security-panel security-panel-wide" style="display: none;">
