@@ -4,9 +4,22 @@ if (!isset($_SESSION['user_id'])) { header('Location: login.php'); exit; }
 $me = $_SESSION['user_id'];
 $xss_ai_fixed = ai_fix_rule_active($conn, 'xss_probe', '/messages.php');
 
+$check_me = $conn->query("SELECT is_admin FROM users WHERE id=$me")->fetch_assoc();
+$is_me_admin = !empty($check_me['is_admin']);
+
 // Send message
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['send']) || isset($_POST['content']))) {
     $to      = (int)$_POST['receiver_id'];
+    
+    // Prevent regular user from sending message to admin
+    if (!$is_me_admin) {
+        $other_is_admin = $conn->query("SELECT is_admin FROM users WHERE id=$to")->fetch_assoc();
+        if ($other_is_admin && !empty($other_is_admin['is_admin'])) {
+            if (isset($_POST['ajax'])) exit;
+            header("Location: messages.php"); exit;
+        }
+    }
+    
     // VULN: content not sanitized = Stored XSS in messages
     $raw_content = $_POST['content'];
     log_if_suspicious_payload($conn, $raw_content, 'Chat message content', 'receiver_id=' . $to);
@@ -22,6 +35,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['send']) || isset($_P
 $to = isset($_GET['to']) ? (int)$_GET['to'] : 0;
 
 if ($to) {
+    // Prevent regular user from reading admin conversation
+    if (!$is_me_admin) {
+        $other_is_admin = $conn->query("SELECT is_admin FROM users WHERE id=$to")->fetch_assoc();
+        if ($other_is_admin && !empty($other_is_admin['is_admin'])) {
+            header("Location: messages.php"); exit;
+        }
+    }
+
     // Mark as read — VULN: marks messages of any user read
     $conn->query("UPDATE messages SET is_read=1 WHERE receiver_id=$to AND sender_id=$me");
 
@@ -43,6 +64,11 @@ if ($to) {
 }
 
 // Get inbox conversations
+$admin_filter = "";
+if (!$is_me_admin) {
+    $admin_filter = "AND u.is_admin = 0";
+}
+
 $inbox = $conn->query("
     SELECT DISTINCT
         CASE WHEN sender_id=$me THEN receiver_id ELSE sender_id END as other_id,
@@ -50,7 +76,7 @@ $inbox = $conn->query("
         MAX(m.created_at) as last_msg
     FROM messages m
     JOIN users u ON u.id = CASE WHEN m.sender_id=$me THEN m.receiver_id ELSE m.sender_id END
-    WHERE m.sender_id=$me OR m.receiver_id=$me
+    WHERE (m.sender_id=$me OR m.receiver_id=$me) $admin_filter
     GROUP BY other_id, u.username, u.avatar, u.full_name
     ORDER BY last_msg DESC
 ");

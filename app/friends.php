@@ -32,11 +32,18 @@ $friends = $conn->query("
     WHERE (fr.sender_id=$me OR fr.receiver_id=$me) AND fr.status='accepted'
 ");
 
-// Suggested users (not friends yet)
+// Suggested users (not friends yet, exclude admin for regular users)
+$admin_cond = "";
+$check_me = $conn->query("SELECT is_admin FROM users WHERE id=$me")->fetch_assoc();
+$is_me_admin = !empty($check_me['is_admin']);
+if (!$is_me_admin) {
+    $admin_cond = "AND u.is_admin = 0";
+}
+
 $suggested = $conn->query("
     SELECT u.id, u.username, u.full_name, u.avatar
     FROM users u
-    WHERE u.id != $me
+    WHERE u.id != $me $admin_cond
     AND u.id NOT IN (
         SELECT CASE WHEN sender_id=$me THEN receiver_id ELSE sender_id END
         FROM friend_requests

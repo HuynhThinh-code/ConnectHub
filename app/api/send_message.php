@@ -22,6 +22,17 @@ if (!$to || $content === '') {
     exit;
 }
 
+$check_me = $conn->query("SELECT is_admin FROM users WHERE id=$me")->fetch_assoc();
+$is_me_admin = !empty($check_me['is_admin']);
+
+if (!$is_me_admin) {
+    $other_is_admin = $conn->query("SELECT is_admin FROM users WHERE id=$to")->fetch_assoc();
+    if ($other_is_admin && !empty($other_is_admin['is_admin'])) {
+        echo json_encode(['error' => 'forbidden_admin_chat']);
+        exit;
+    }
+}
+
 // VULN: no CSRF token
 log_if_suspicious_payload($conn, $content, 'Messenger popup content', 'receiver_id=' . $to);
 $content = $conn->real_escape_string($content);

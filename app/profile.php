@@ -59,7 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_friend_request']
             </div>
             <div class="profile-actions">
                 <?php if ($id != $_SESSION['user_id']): ?>
-                    <a href="messages.php?to=<?= $id ?>" class="btn btn-primary"><i class="fas fa-comment"></i> Message</a>
+                    <?php if (!$user['is_admin'] || !empty($_SESSION['is_admin'])): ?>
+                        <a href="messages.php?to=<?= $id ?>" class="btn btn-primary"><i class="fas fa-comment"></i> Message</a>
+                    <?php endif; ?>
                     <?php if (!$is_friend && !$pending): ?>
                         <form method="POST" style="display:inline">
                             <button name="send_friend_request" class="btn btn-success"><i class="fas fa-user-plus"></i> Add Friend</button>

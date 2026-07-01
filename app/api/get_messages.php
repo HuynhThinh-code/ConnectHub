@@ -20,6 +20,17 @@ if (!$to) {
     exit;
 }
 
+$check_me = $conn->query("SELECT is_admin FROM users WHERE id=$me")->fetch_assoc();
+$is_me_admin = !empty($check_me['is_admin']);
+
+if (!$is_me_admin) {
+    $other_is_admin = $conn->query("SELECT is_admin FROM users WHERE id=$to")->fetch_assoc();
+    if ($other_is_admin && !empty($other_is_admin['is_admin'])) {
+        echo json_encode([]);
+        exit;
+    }
+}
+
 $messages = [];
 
 if ($last_id === 0) {
