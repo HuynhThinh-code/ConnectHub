@@ -80,6 +80,15 @@ function ensure_admin_schema($conn) {
         )
     ");
 
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS blocked_ips (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            ip_address VARCHAR(64) UNIQUE NOT NULL,
+            blocked_reason VARCHAR(255) NULL,
+            blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ");
+
     $event_columns = [];
     $res = $conn->query("SHOW COLUMNS FROM security_events");
     if ($res) {
@@ -463,6 +472,32 @@ function enforce_single_session($conn) {
             setcookie('remember_token', '', time()-3600, '/');
             
             header('Location: login.php?logged_out_elsewhere=1');
+            exit;
+        }
+    }
+}
+
+function enforce_ip_blocking($conn) {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    if (empty($ip)) return;
+
+    $stmt = $conn->prepare("SELECT blocked_reason FROM blocked_ips WHERE ip_address = ?");
+    if ($stmt) {
+        $stmt->bind_param('s', $ip);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        if ($res && $res->num_rows > 0) {
+            $row = $res->fetch_assoc();
+            $reason = $row['blocked_reason'] ?: 'No reason provided';
+            http_response_code(403);
+            header('Content-Type: text/html; charset=utf-8');
+            echo '<!doctype html><html><head><meta charset="utf-8"><title>Access Denied (IP Blocked)</title>';
+            echo '<style>body{font-family:Arial,sans-serif;background:#fff5f5;color:#1f2937;padding:40px}.box{max-width:720px;margin:auto;background:#fff;border-left:6px solid #e53e3e;border-radius:8px;padding:24px;box-shadow:0 12px 30px rgba(0,0,0,.08)}h1{color:#c53030;margin-top:0}code{background:#eef2f7;border-radius:6px;padding:3px 6px}</style>';
+            echo '</head><body><div class="box">';
+            echo '<h1>Access Denied (IP Blocked)</h1>';
+            echo '<p>Your IP address <code>' . htmlspecialchars($ip) . '</code> has been blocked by the system administrator.</p>';
+            echo '<p><strong>Reason:</strong> ' . htmlspecialchars($reason) . '</p>';
+            echo '</div></body></html>';
             exit;
         }
     }

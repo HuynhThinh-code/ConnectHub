@@ -54,6 +54,7 @@ define('UPLOAD_URL', BASE_URL . '/uploads/');
 
 require_once __DIR__ . '/security.php';
 ensure_admin_schema($conn);
+enforce_ip_blocking($conn);
 inspect_request_for_intrusion($conn);
 enforce_ai_fix_rules($conn);
 enforce_not_banned($conn);

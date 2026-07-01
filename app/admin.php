@@ -256,6 +256,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $conn->query("UPDATE security_events SET deleted_at=NOW() WHERE $where");
             $message = 'Old duplicate security events deleted.';
         }
+    } elseif ($action === 'block_ip') {
+        $ip_to_block = isset($_POST['ip_address']) ? trim($_POST['ip_address']) : '';
+        $reason = isset($_POST['reason']) ? trim($_POST['reason']) : 'Malicious activity detected';
+        $my_ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        
+        if (empty($ip_to_block)) {
+            $error = 'IP address cannot be empty.';
+        } elseif ($ip_to_block === $my_ip) {
+            $error = 'You cannot block your own current IP address (' . htmlspecialchars($my_ip) . ') to prevent lock-out.';
+        } else {
+            $stmt = $conn->prepare("INSERT INTO blocked_ips (ip_address, blocked_reason) VALUES (?, ?) ON DUPLICATE KEY UPDATE blocked_reason = VALUES(blocked_reason)");
+            if ($stmt) {
+                $stmt->bind_param('ss', $ip_to_block, $reason);
+                $stmt->execute();
+                log_security_event($conn, 'admin_blocked_ip', 'high', 'Admin blocked IP: ' . $ip_to_block, 'ip=' . $ip_to_block);
+                $message = 'IP address ' . htmlspecialchars($ip_to_block) . ' blocked successfully.';
+            } else {
+                $error = 'Failed to block IP due to database error.';
+            }
+        }
+    } elseif ($action === 'unblock_ip') {
+        $ip_to_unblock = isset($_POST['ip_address']) ? trim($_POST['ip_address']) : '';
+        if (!empty($ip_to_unblock)) {
+            $stmt = $conn->prepare("DELETE FROM blocked_ips WHERE ip_address = ?");
+            if ($stmt) {
+                $stmt->bind_param('s', $ip_to_unblock);
+                $stmt->execute();
+                log_security_event($conn, 'admin_unblocked_ip', 'medium', 'Admin unblocked IP: ' . $ip_to_unblock, 'ip=' . $ip_to_unblock);
+                $message = 'IP address ' . htmlspecialchars($ip_to_unblock) . ' unblocked successfully.';
+            } else {
+                $error = 'Failed to unblock IP due to database error.';
+            }
+        }
     }
 }
 
@@ -334,6 +367,14 @@ $stats['open_events'] = 0;
 foreach ($attack_event_groups as $event) {
     if (in_array($event['severity'], ['high', 'critical'], true) && empty($event['ai_fixed_at']) && empty($event['resolved_at'])) {
         $stats['open_events']++;
+    }
+}
+
+$blocked_ips_res = $conn->query("SELECT ip_address FROM blocked_ips");
+$blocked_ips = [];
+if ($blocked_ips_res) {
+    while ($row = $blocked_ips_res->fetch_assoc()) {
+        $blocked_ips[$row['ip_address']] = true;
     }
 }
 
@@ -1064,57 +1105,97 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
                 <h3><i class="fas fa-bug"></i> Detected Vulnerability Attempts</h3>
                 <?php if (!empty($attack_event_groups)): ?>
                     <div class="security-events">
-                        <?php foreach ($attack_event_groups as $event): ?>
-                        <article class="security-event severity-<?= htmlspecialchars($event['severity']) ?> <?= $event['resolved_at'] ? 'resolved' : '' ?> <?= $event['ai_fixed_at'] ? 'fixed' : '' ?>">
+                        <?php foreach ($attack_event_groups as $event): 
+                            $event_ip = $event['ip_address'];
+                            $is_ip_blocked = isset($blocked_ips[$event_ip]);
+                        ?>
+                        <article class="security-event severity-<?= htmlspecialchars($event['severity']) ?> <?= $event['resolved_at'] ? 'resolved' : '' ?> <?= $event['ai_fixed_at'] ? 'fixed' : '' ?> <?= $is_ip_blocked ? 'ip-blocked' : '' ?>">
                             <form method="POST" class="event-delete-form">
                                 <input type="hidden" name="id" value="<?= (int)$event['id'] ?>">
                                 <button name="action" value="delete_event" class="event-delete-btn" title="Delete old event" onclick="return confirm('Delete this old security event?')"><i class="fas fa-xmark"></i></button>
                             </form>
-                            <div class="event-main">
-                                <div>
-                                    <strong><?= htmlspecialchars(admin_event_label($event['event_type'])) ?></strong>
-                                    <span>
-                                        <?= htmlspecialchars(admin_event_time($event['occurred_at'] ?: $event['created_at'])) ?> &middot;
-                                        <?= htmlspecialchars(admin_event_actor($event)) ?> &middot;
-                                        <?= htmlspecialchars($event['ip_address']) ?>
-                                        <?php if (!empty($event['duplicate_count']) && $event['duplicate_count'] > 1): ?>
-                                            &middot; <?= (int)$event['duplicate_count'] ?> duplicate attempts
+                            
+                            <div class="event-header-wrapper">
+                                <div class="event-meta-info">
+                                    <div class="event-title-badge">
+                                        <span class="event-title-text"><?= htmlspecialchars(admin_event_label($event['event_type'])) ?></span>
+                                        <?php if ($is_ip_blocked): ?>
+                                            <span class="blocked-badge"><i class="fas fa-ban"></i> IP BLOCKED</span>
                                         <?php endif; ?>
-                                    </span>
+                                    </div>
+                                    <div class="event-sub-meta">
+                                        <span class="meta-item"><i class="far fa-clock"></i> <?= htmlspecialchars(admin_event_time($event['occurred_at'] ?: $event['created_at'])) ?></span>
+                                        <span class="meta-item"><i class="far fa-user"></i> <?= htmlspecialchars(admin_event_actor($event)) ?></span>
+                                        <span class="meta-item ip-address-item"><i class="fas fa-network-wired"></i> <?= htmlspecialchars($event_ip) ?></span>
+                                        <?php if (!empty($event['duplicate_count']) && $event['duplicate_count'] > 1): ?>
+                                            <span class="meta-item duplicate-badge"><i class="fas fa-arrows-spin"></i> <?= (int)$event['duplicate_count'] ?> attempts</span>
+                                        <?php endif; ?>
+                                    </div>
                                 </div>
-                                <?php if ($event['ai_fixed_at']): ?>
-                                    <span class="severity-badge severity-fixed">FIXED</span>
-                                <?php else: ?>
-                                    <span class="severity-badge severity-<?= htmlspecialchars($event['severity']) ?>"><?= htmlspecialchars(strtoupper($event['severity'])) ?></span>
-                                <?php endif; ?>
+                                
+                                <div class="event-severity-badge">
+                                    <?php if ($event['ai_fixed_at']): ?>
+                                        <span class="severity-badge severity-fixed"><i class="fas fa-shield-halved"></i> FIXED</span>
+                                    <?php else: ?>
+                                        <span class="severity-badge severity-<?= htmlspecialchars($event['severity']) ?>"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars(strtoupper($event['severity'])) ?></span>
+                                    <?php endif; ?>
+                                </div>
                             </div>
-                            <p><?= htmlspecialchars($event['details']) ?></p>
-                            <?php if ($event['request_uri']): ?><code>URL: <?= htmlspecialchars(substr($event['request_uri'], 0, 220)) ?></code><?php endif; ?>
-                            <code>Payload: <?= htmlspecialchars(admin_event_payload($event['payload'])) ?></code>
-                             <?php if ($event['ai_fixed_at']): ?>
-                                 <div class="ai-fix-summary">
-                                     <strong><i class="fas fa-wand-magic-sparkles"></i> AI Fix applied at <?= htmlspecialchars(admin_event_time($event['ai_fixed_at'])) ?></strong>
-                                     <p><?= htmlspecialchars($event['ai_fix_summary']) ?></p>
-                                     <small>Protection source: <a href="<?= htmlspecialchars(ai_security_source_url()) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(ai_security_source_name()) ?></a></small>
-                                 </div>
-                             <?php elseif (!$event['resolved_at']): ?>
-                                 <div class="security-event-actions">
-                                     <button type="button" class="btn btn-success btn-sm" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
-                                         <i class="fas fa-wand-magic-sparkles"></i> AI Fix
-                                     </button>
-                                     <form method="POST" style="display:inline;">
-                                         <input type="hidden" name="id" value="<?= (int)$event['id'] ?>">
-                                         <button name="action" value="resolve_event" class="btn btn-secondary btn-sm"><i class="fas fa-check-double"></i> Mark reviewed</button>
-                                     </form>
-                                 </div>
-                             <?php else: ?>
-                                 <div class="security-event-actions">
-                                     <button type="button" class="btn btn-success btn-sm" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
-                                         <i class="fas fa-wand-magic-sparkles"></i> AI Fix
-                                     </button>
-                                     <small class="text-muted">Reviewed at <?= htmlspecialchars(admin_event_time($event['resolved_at'])) ?></small>
-                                 </div>
-                             <?php endif; ?>
+
+                            <div class="event-details-body">
+                                <p class="event-description"><?= htmlspecialchars($event['details']) ?></p>
+                                <?php if ($event['request_uri']): ?>
+                                    <div class="code-wrapper">
+                                        <span class="code-label">ROUTE / URL:</span>
+                                        <code><?= htmlspecialchars(substr($event['request_uri'], 0, 220)) ?></code>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="code-wrapper">
+                                    <span class="code-label">PAYLOAD:</span>
+                                    <code><?= htmlspecialchars(admin_event_payload($event['payload'])) ?></code>
+                                </div>
+                            </div>
+
+                            <?php if ($event['ai_fixed_at']): ?>
+                                <div class="ai-fix-summary-box">
+                                    <div class="ai-fix-title"><i class="fas fa-wand-magic-sparkles"></i> AI Auto-Patch Applied</div>
+                                    <p class="ai-fix-text"><?= htmlspecialchars($event['ai_fix_summary']) ?></p>
+                                    <small class="ai-fix-source">Protection rule active &middot; Guided by <a href="<?= htmlspecialchars(ai_security_source_url()) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(ai_security_source_name()) ?></a></small>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="security-event-footer">
+                                <div class="security-event-actions">
+                                    <?php if (!$event['ai_fixed_at']): ?>
+                                        <button type="button" class="btn btn-success btn-sm btn-glow" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
+                                            <i class="fas fa-wand-magic-sparkles"></i> AI Fix
+                                        </button>
+                                    <?php endif; ?>
+
+                                    <?php if (!$event['resolved_at'] && !$event['ai_fixed_at']): ?>
+                                        <form method="POST" style="display:inline;">
+                                            <input type="hidden" name="id" value="<?= (int)$event['id'] ?>">
+                                            <button name="action" value="resolve_event" class="btn btn-secondary btn-sm"><i class="fas fa-check-double"></i> Mark reviewed</button>
+                                        </form>
+                                    <?php elseif ($event['resolved_at'] && !$event['ai_fixed_at']): ?>
+                                        <span class="reviewed-text"><i class="fas fa-check-circle"></i> Reviewed at <?= htmlspecialchars(admin_event_time($event['resolved_at'])) ?></span>
+                                    <?php endif; ?>
+
+                                    <!-- IP BLOCK ACTION BUTTON -->
+                                    <?php if ($is_ip_blocked): ?>
+                                        <form method="POST" style="display:inline;">
+                                            <input type="hidden" name="ip_address" value="<?= htmlspecialchars($event_ip) ?>">
+                                            <button name="action" value="unblock_ip" class="btn btn-outline-success btn-sm btn-ip-action"><i class="fas fa-unlock"></i> Unblock IP</button>
+                                        </form>
+                                    <?php else: ?>
+                                        <form method="POST" style="display:inline;">
+                                            <input type="hidden" name="ip_address" value="<?= htmlspecialchars($event_ip) ?>">
+                                            <input type="hidden" name="reason" value="Intrusion attempt: <?= htmlspecialchars($event['event_type']) ?>">
+                                            <button name="action" value="block_ip" class="btn btn-outline-danger btn-sm btn-ip-action" onclick="return confirm('Are you sure you want to block IP: <?= htmlspecialchars($event_ip) ?>?')"><i class="fas fa-ban"></i> Block IP</button>
+                                        </form>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
                         </article>
                         <?php endforeach; ?>
                     </div>
