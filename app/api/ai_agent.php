@@ -83,23 +83,78 @@ if ($action === 'chat') {
     }
     $context = json_encode($recent_events, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
-    // Context files structure to tell the agent where vulnerability entrypoints exist
+    // Context files structure to tell the agent where vulnerability entrypoints exist and how to test them
     $files_map = "
-    Relevant Files in Lab Workspace:
-    - /login.php: SQL Injection, weak session
-    - /search.php: SQL Injection in search query, Reflected XSS
-    - /index.php: Feed page, Stored XSS, private post disclosure
-    - /post.php: View post details, Stored XSS
-    - /profile.php: User profile, IDOR private disclosure
-    - /messages.php & /api/get_messages.php & /api/send_message.php: Private messages, IDOR message disclosure, Stored XSS
-    - /settings.php: Avatar upload bypass, Command Injection in image metadata processing
-    - /preview.php: URL preview, Server-Side Request Forgery (SSRF)
-    - /oauth.php: OAuth scope validation, OAuth scope escalation
-    - /includes/db.php: PHP database connection & weak session configuration
+    Lab Guide & Vulnerability Testing Map:
+    
+    1. SQL Injection - Login:
+       - Path: app/login.php
+       - Payload: Username 'admin\' AND 1=1 #' / Password: 'any'
+       - Goal: Bypass login and access the admin account.
+       
+    2. SQL Injection - User Search:
+       - Path: app/search.php?q=
+       - Payload: ' UNION SELECT 1,username,password,email,'default-male.svg' FROM users-- -
+       - Goal: Expose password hashes and emails of all users.
+       
+    3. Reflected XSS - Search:
+       - Path: app/search.php?q=
+       - Payload: \"><script>alert(document.cookie)</script>
+       - Goal: Trigger a popup displaying session cookies.
+       
+    4. Stored XSS - Feed Post:
+       - Path: app/index.php (Feed posting)
+       - Payload: <script>alert(document.cookie)</script> or <img src=x onerror=alert(document.cookie)>
+       - Goal: Script executes when any user loads the feed.
+       
+    5. Stored XSS - Comments:
+       - Path: app/post.php?id=<id> (Creating comment)
+       - Payload: <img src=x onerror=alert(document.cookie)>
+       - Goal: Script executes when any user views the post details.
+       
+    6. Stored XSS - Private Message:
+       - Path: app/messages.php?to=<id> (Sending message)
+       - Payload: <img src=x onerror=alert(document.cookie)>
+       - Goal: Script executes when recipient opens the private chat.
+       
+    7. Private Posts Disclosure (IDOR):
+       - Path: app/profile.php?id=<id>
+       - Exploit: Log in as Bob (bob123), view Alice's profile (id=2).
+       - Goal: Disclose and read Alice's private posts.
+       
+    8. Private Messages Disclosure (IDOR):
+       - Path: app/messages.php?to=<id> or app/api/get_messages.php?to=<id>&last_id=0
+       - Exploit: Change ID parameter to read conversations of other users.
+       
+    9. Weak Session / Session Hijacking:
+       - Path: app/includes/db.php & app/login.php
+       - Vulnerability: session cookie lacks HttpOnly/Secure flags. Remember token is MD5(username + time()).
+       
+    10. Command Injection - Avatar Upload:
+        - Path: app/settings.php
+        - Exploit: Rename upload image file to: pwned.jpg'; id; echo '
+        - Goal: Exiftool runs the shell command and outputs system identity in the response.
+        
+    11. Avatar Upload Bypass:
+        - Path: app/settings.php
+        - Exploit: Upload plain text test.txt instead of an image.
+        - Goal: System accepts the file without verifying MIME-type or extension.
+        
+    12. SSRF - URL Preview:
+        - Path: app/preview.php
+        - Payload: file:///etc/passwd or http://127.0.0.1/admin.php
+        - Goal: Server fetches local files or internal admin page and prints to user.
+        
+    13. OAuth Scope Escalation:
+        - Path: app/oauth.php
+        - Exploit: Query with provider=github&simulate=1&scope=admin or select scope 'admin' on OAuth UI.
+        - Goal: Server accepts client scope without verification.
     ";
 
     $systemInstruction = "You are a professional AppSec AI Agent in charge of maintaining and patching the ConnectHub Vulnerable Social Media PHP Lab.
-You must help the administrator secure the application against OWASP Top 10 vulnerabilities.
+You must help the administrator/student secure the application against OWASP Top 10 vulnerabilities.
+
+If the user asks 'how to test' a vulnerability or asks for tasks/instructions on what to do in the lab, explain the corresponding step from the Lab Guide and give them the exact URL/payload to test. Keep the guidance clear, instructive, and supportive.
 
 $files_map
 
