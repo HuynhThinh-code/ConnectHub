@@ -1,4 +1,28 @@
 <?php
+function get_client_ip() {
+    $ip = '127.0.0.1';
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
+        $ip = trim($ips[0]);
+    } elseif (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        $ip = trim($_SERVER['HTTP_X_REAL_IP']);
+    } elseif (!empty($_SERVER['REMOTE_ADDR'])) {
+        $ip = trim($_SERVER['REMOTE_ADDR']);
+    }
+    
+    // Normalize localhost IPv6 to IPv4 loopback
+    if ($ip === '::1') {
+        return '127.0.0.1';
+    }
+    
+    // Normalize IPv4-mapped IPv6 (::ffff:127.0.0.1)
+    if (strpos($ip, '::ffff:') === 0) {
+        return substr($ip, 7);
+    }
+    
+    return $ip;
+}
+
 function ensure_admin_schema($conn) {
     static $done = false;
     if ($done) return;
@@ -216,7 +240,7 @@ function log_security_event($conn, $event_type, $severity, $details, $payload = 
     $uid = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 'NULL';
     $actor = $actor_username ?: current_actor_username($conn);
     $safe_actor = $actor ? "'" . $conn->real_escape_string(substr($actor, 0, 80)) . "'" : 'NULL';
-    $ip = $conn->real_escape_string($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+    $ip = $conn->real_escape_string(get_client_ip());
     $ua = $conn->real_escape_string(substr($_SERVER['HTTP_USER_AGENT'] ?? 'unknown', 0, 255));
     $uri = $conn->real_escape_string($_SERVER['REQUEST_URI'] ?? '');
     $type = $conn->real_escape_string($event_type);
@@ -478,7 +502,7 @@ function enforce_single_session($conn) {
 }
 
 function enforce_ip_blocking($conn) {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    $ip = get_client_ip();
     if (empty($ip)) return;
 
     $stmt = $conn->prepare("SELECT blocked_reason FROM blocked_ips WHERE ip_address = ?");

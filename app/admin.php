@@ -259,7 +259,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     } elseif ($action === 'block_ip') {
         $ip_to_block = isset($_POST['ip_address']) ? trim($_POST['ip_address']) : '';
         $reason = isset($_POST['reason']) ? trim($_POST['reason']) : 'Malicious activity detected';
-        $my_ip = $_SERVER['REMOTE_ADDR'] ?? '';
+        $my_ip = get_client_ip();
         
         if (empty($ip_to_block)) {
             $error = 'IP address cannot be empty.';
@@ -377,6 +377,7 @@ if ($blocked_ips_res) {
         $blocked_ips[$row['ip_address']] = true;
     }
 }
+$all_blocked_ips_list = $conn->query("SELECT * FROM blocked_ips ORDER BY blocked_at DESC");
 
 $ai_fix_rules = $conn->query("
     SELECT *
@@ -1201,6 +1202,41 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
                     </div>
                 <?php else: ?>
                     <p class="text-muted">No vulnerability attempts have been detected yet.</p>
+                <?php endif; ?>
+            </section>
+
+            <section class="security-panel">
+                <h3><i class="fas fa-ban"></i> Banned/Blocked IP Addresses</h3>
+                <?php if ($all_blocked_ips_list && $all_blocked_ips_list->num_rows > 0): ?>
+                    <div class="admin-table-wrap">
+                        <table class="admin-table security-table">
+                            <thead>
+                                <tr>
+                                    <th>IP Address</th>
+                                    <th>Reason</th>
+                                    <th>Blocked At</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php while ($b_ip = $all_blocked_ips_list->fetch_assoc()): ?>
+                                <tr>
+                                    <td><code class="ip-address-item"><?= htmlspecialchars($b_ip['ip_address']) ?></code></td>
+                                    <td><?= htmlspecialchars($b_ip['blocked_reason'] ?: 'No reason provided') ?></td>
+                                    <td><?= htmlspecialchars(admin_event_time($b_ip['blocked_at'])) ?></td>
+                                    <td>
+                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Unban IP: <?= htmlspecialchars($b_ip['ip_address']) ?>?')">
+                                            <input type="hidden" name="ip_address" value="<?= htmlspecialchars($b_ip['ip_address']) ?>">
+                                            <button name="action" value="unblock_ip" class="btn btn-success btn-sm"><i class="fas fa-unlock"></i> Unban IP</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endwhile; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <p class="text-muted"><i class="fas fa-circle-check"></i> No IP addresses are currently blocked.</p>
                 <?php endif; ?>
             </section>
 
