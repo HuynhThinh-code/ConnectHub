@@ -167,6 +167,84 @@ function admin_train_ai_fix_from_events($conn, $admin_id) {
     return count($trained);
 }
 
+function admin_reset_lab_database($conn) {
+    $conn->query("SET FOREIGN_KEY_CHECKS=0");
+    foreach ([
+        'ai_fix_rules',
+        'security_events',
+        'blocked_ips',
+        'app_meta',
+        'url_previews',
+        'friend_requests',
+        'messages',
+        'comments',
+        'posts',
+        'users',
+    ] as $table) {
+        $conn->query("TRUNCATE TABLE $table");
+    }
+    $conn->query("SET FOREIGN_KEY_CHECKS=1");
+
+    $conn->query("
+        INSERT INTO users (id, username, email, password, full_name, gender, bio, avatar, session_token, oauth_provider, oauth_id, oauth_scope, is_admin, is_banned, ban_reason, banned_at) VALUES
+        (1, 'admin', 'admin@connecthub.local', MD5('admin123'), 'Administrator', 'male', 'System admin', 'default-male.svg', NULL, NULL, NULL, 'read', 1, 0, NULL, NULL),
+        (2, 'alice', 'alice@example.com', MD5('alice123'), 'Alice Johnson', 'female', 'Love photography', 'default-female.svg', NULL, NULL, NULL, 'read', 0, 0, NULL, NULL),
+        (3, 'bob', 'bob@example.com', MD5('bob123'), 'Bob Smith', 'male', 'Coffee & Code', 'default-male.svg', NULL, NULL, NULL, 'read', 0, 0, NULL, NULL),
+        (4, 'charlie', 'charlie@example.com', MD5('charlie123'), 'Charlie Brown', 'male', 'Security researcher', 'default-male.svg', NULL, NULL, NULL, 'read', 0, 0, NULL, NULL)
+    ");
+
+    $conn->query("
+        INSERT INTO posts (id, user_id, content, image, is_private, status, moderation_note, moderated_by, moderated_at) VALUES
+        (1, 2, 'Hello ConnectHub! Excited to be here', NULL, 0, 'approved', NULL, NULL, NULL),
+        (2, 2, 'This is my private post with sensitive info: secret_key=ABC123', NULL, 1, 'approved', NULL, NULL, NULL),
+        (3, 3, 'Working on a new project today', NULL, 0, 'approved', NULL, NULL, NULL),
+        (4, 4, 'Security tip: always sanitize your inputs!', NULL, 0, 'approved', NULL, NULL, NULL)
+    ");
+
+    $conn->query("
+        INSERT INTO comments (id, post_id, user_id, content) VALUES
+        (1, 1, 3, 'Welcome Alice!'),
+        (2, 1, 4, 'Great to have you here!'),
+        (3, 3, 2, 'What project are you working on?')
+    ");
+
+    $conn->query("
+        INSERT INTO messages (id, sender_id, receiver_id, content, is_read) VALUES
+        (1, 2, 3, 'Chao Bob, hom nay ban khoe khong?', 0),
+        (2, 3, 2, 'Chao Alice! Minh van on, con ban?', 0),
+        (3, 2, 4, 'Charlie, can you review my code?', 0),
+        (4, 1, 2, 'Admin message: Your account has been verified', 0)
+    ");
+
+    $conn->query("
+        INSERT INTO friend_requests (id, sender_id, receiver_id, status) VALUES
+        (1, 2, 3, 'accepted'),
+        (2, 2, 4, 'pending'),
+        (3, 3, 4, 'accepted')
+    ");
+}
+
+function admin_reset_uploaded_files() {
+    $keep = [
+        'default-female.svg' => true,
+        'default-male.svg' => true,
+        'default.php' => true,
+        'default.png' => true,
+        'images.jpg' => true,
+        'b79144e03dc4996ce319ff59118caf65.jpg' => true,
+        'aNITSCAMRENGIEN.png' => true,
+        'anh-dai-dien-facebook-nam-6.webp' => true,
+    ];
+    $upload_dir = realpath(UPLOAD_DIR);
+    if (!$upload_dir || !is_dir($upload_dir)) return;
+
+    foreach (new DirectoryIterator($upload_dir) as $file) {
+        if (!$file->isFile()) continue;
+        if (isset($keep[$file->getFilename()])) continue;
+        @unlink($file->getPathname());
+    }
+}
+
 function admin_group_attack_events($result) {
     $groups = [];
     if (!$result) return $groups;
@@ -290,11 +368,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
         }
     } elseif ($action === 'reset_security_data') {
-        $conn->query("TRUNCATE TABLE ai_fix_rules");
-        $conn->query("TRUNCATE TABLE security_events");
-        $conn->query("TRUNCATE TABLE blocked_ips");
-        $conn->query("UPDATE posts SET status='approved', moderation_note=NULL, moderated_by=NULL, moderated_at=NULL");
-        $conn->query("UPDATE users SET is_banned=0, ban_reason=NULL, banned_at=NULL");
+        admin_reset_lab_database($conn);
+        admin_reset_uploaded_files();
+
+        $token = md5('admin' . time());
+        $_SESSION['user_id'] = 1;
+        $_SESSION['username'] = 'admin';
+        $_SESSION['is_admin'] = 1;
+        $_SESSION['session_token'] = $token;
+        $safe_token = $conn->real_escape_string($token);
+        $conn->query("UPDATE users SET session_token='$safe_token' WHERE id=1");
+        setcookie('remember_token', '', time()-3600, '/');
         
         // Scan for .bak files and restore the original code files
         $basePath = realpath(__DIR__);
@@ -314,8 +398,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
         }
         
-        log_security_event($conn, 'lab_reset', 'medium', 'Admin reset the lab security state to default.');
-        $message = 'Lab security database and code patches have been successfully reset to default.';
+        $message = 'Lab database reset complete. Default users, posts, comments, messages, friend requests, security logs, AI rules, blocked IPs, and generated uploads are back to the initial seed state.';
     }
 }
 
@@ -556,7 +639,7 @@ $ai_fix_rules = $conn->query("
         <div class="section-heading">
             <h2><i class="fas fa-shield-halved"></i> Intrusion Detection</h2>
             <div style="display: flex; gap: 12px; align-items: center;">
-                <form method="POST" style="margin: 0;" onsubmit="return confirm('WARNING: This will clear all AI fix rules, delete security logs, delete blocked IPs, and restore all original vulnerable files. Are you sure you want to reset the lab?')">
+                <form method="POST" style="margin: 0;" onsubmit="return confirm('WARNING: This will reset the lab database to the initial seed state, clear AI fix rules/security logs/blocked IPs, remove generated uploads, and restore original vulnerable files. Continue?')">
                     <button name="action" value="reset_security_data" class="btn btn-outline-danger btn-sm"><i class="fas fa-rotate-left"></i> Reset Lab State</button>
                 </form>
                 <span style="font-size: 0.85rem; color: var(--text-muted);">Server timezone: Asia/Ho_Chi_Minh (UTC+7)</span>
