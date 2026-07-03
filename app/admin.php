@@ -168,6 +168,12 @@ function admin_train_ai_fix_from_events($conn, $admin_id) {
 }
 
 function admin_reset_lab_database($conn) {
+    $run = function($sql) use ($conn) {
+        if (!$conn->query($sql)) {
+            throw new Exception($conn->error);
+        }
+    };
+
     $conn->query("SET FOREIGN_KEY_CHECKS=0");
     foreach ([
         'ai_fix_rules',
@@ -181,11 +187,12 @@ function admin_reset_lab_database($conn) {
         'posts',
         'users',
     ] as $table) {
-        $conn->query("TRUNCATE TABLE $table");
+        $run("DELETE FROM $table");
+        $run("ALTER TABLE $table AUTO_INCREMENT=1");
     }
     $conn->query("SET FOREIGN_KEY_CHECKS=1");
 
-    $conn->query("
+    $run("
         INSERT INTO users (id, username, email, password, full_name, gender, bio, avatar, session_token, oauth_provider, oauth_id, oauth_scope, is_admin, is_banned, ban_reason, banned_at) VALUES
         (1, 'admin', 'admin@connecthub.local', MD5('admin123'), 'Administrator', 'male', 'System admin', 'default-male.svg', NULL, NULL, NULL, 'read', 1, 0, NULL, NULL),
         (2, 'alice', 'alice@example.com', MD5('alice123'), 'Alice Johnson', 'female', 'Love photography', 'default-female.svg', NULL, NULL, NULL, 'read', 0, 0, NULL, NULL),
@@ -193,7 +200,7 @@ function admin_reset_lab_database($conn) {
         (4, 'charlie', 'charlie@example.com', MD5('charlie123'), 'Charlie Brown', 'male', 'Security researcher', 'default-male.svg', NULL, NULL, NULL, 'read', 0, 0, NULL, NULL)
     ");
 
-    $conn->query("
+    $run("
         INSERT INTO posts (id, user_id, content, image, is_private, status, moderation_note, moderated_by, moderated_at) VALUES
         (1, 2, 'Hello ConnectHub! Excited to be here', NULL, 0, 'approved', NULL, NULL, NULL),
         (2, 2, 'This is my private post with sensitive info: secret_key=ABC123', NULL, 1, 'approved', NULL, NULL, NULL),
@@ -201,14 +208,14 @@ function admin_reset_lab_database($conn) {
         (4, 4, 'Security tip: always sanitize your inputs!', NULL, 0, 'approved', NULL, NULL, NULL)
     ");
 
-    $conn->query("
+    $run("
         INSERT INTO comments (id, post_id, user_id, content) VALUES
         (1, 1, 3, 'Welcome Alice!'),
         (2, 1, 4, 'Great to have you here!'),
         (3, 3, 2, 'What project are you working on?')
     ");
 
-    $conn->query("
+    $run("
         INSERT INTO messages (id, sender_id, receiver_id, content, is_read) VALUES
         (1, 2, 3, 'Chao Bob, hom nay ban khoe khong?', 0),
         (2, 3, 2, 'Chao Alice! Minh van on, con ban?', 0),
@@ -216,7 +223,7 @@ function admin_reset_lab_database($conn) {
         (4, 1, 2, 'Admin message: Your account has been verified', 0)
     ");
 
-    $conn->query("
+    $run("
         INSERT INTO friend_requests (id, sender_id, receiver_id, status) VALUES
         (1, 2, 3, 'accepted'),
         (2, 2, 4, 'pending'),
@@ -368,17 +375,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
         }
     } elseif ($action === 'reset_security_data') {
-        admin_reset_lab_database($conn);
-        admin_reset_uploaded_files();
+        try {
+            admin_reset_lab_database($conn);
+            admin_reset_uploaded_files();
 
-        $token = md5('admin' . time());
-        $_SESSION['user_id'] = 1;
-        $_SESSION['username'] = 'admin';
-        $_SESSION['is_admin'] = 1;
-        $_SESSION['session_token'] = $token;
-        $safe_token = $conn->real_escape_string($token);
-        $conn->query("UPDATE users SET session_token='$safe_token' WHERE id=1");
-        setcookie('remember_token', '', time()-3600, '/');
+            $token = md5('admin' . time());
+            $_SESSION['user_id'] = 1;
+            $_SESSION['username'] = 'admin';
+            $_SESSION['is_admin'] = 1;
+            $_SESSION['session_token'] = $token;
+            $safe_token = $conn->real_escape_string($token);
+            $conn->query("UPDATE users SET session_token='$safe_token' WHERE id=1");
+            setcookie('remember_token', '', time()-3600, '/');
+            $message = 'Lab database reset complete. Default users, posts, comments, messages, friend requests, security logs, AI rules, blocked IPs, and generated uploads are back to the initial seed state.';
+        } catch (Exception $e) {
+            $conn->query("SET FOREIGN_KEY_CHECKS=1");
+            $error = 'Lab reset failed: ' . $e->getMessage();
+        }
         
         // Scan for .bak files and restore the original code files
         $basePath = realpath(__DIR__);
@@ -398,7 +411,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
         }
         
-        $message = 'Lab database reset complete. Default users, posts, comments, messages, friend requests, security logs, AI rules, blocked IPs, and generated uploads are back to the initial seed state.';
     }
 }
 
