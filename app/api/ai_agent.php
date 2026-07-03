@@ -7,8 +7,17 @@ header('Content-Type: application/json; charset=utf-8');
 $input = json_decode(file_get_contents('php://input'), true);
 $action = $input['action'] ?? '';
 
-// Retrieve Gemini API Key from app_meta
+// Retrieve Gemini API Key from agent config, with legacy app_meta fallback.
 function get_gemini_api_key($conn) {
+    $stmt = $conn->prepare("SELECT config_value FROM ai_agent_config WHERE config_key = 'gemini_api_key' LIMIT 1");
+    if ($stmt) {
+        $stmt->execute();
+        $res = $stmt->get_result();
+        if ($res && $row = $res->fetch_assoc()) {
+            return $row['config_value'];
+        }
+    }
+
     $stmt = $conn->prepare("SELECT meta_value FROM app_meta WHERE meta_key = 'gemini_api_key' LIMIT 1");
     if ($stmt) {
         $stmt->execute();
@@ -20,6 +29,182 @@ function get_gemini_api_key($conn) {
     return '';
 }
 
+function load_agent_memory_context($conn) {
+    $memories = [];
+    $res = $conn->query("
+        SELECT event_type, route, fix_summary, source_name, updated_at
+        FROM ai_agent_memory
+        ORDER BY updated_at DESC
+        LIMIT 30
+    ");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $memories[] = $row;
+        }
+    }
+
+    if (empty($memories)) {
+        return "No persistent agent memory has been trained yet.";
+    }
+
+    return json_encode($memories, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+}
+
+function route_to_source_file($route) {
+    $route = normalize_security_route($route);
+    if (strpos($route, '/api/') === 0) {
+        return __DIR__ . '/../' . ltrim($route, '/');
+    }
+    return __DIR__ . '/..' . $route;
+}
+
+function inspect_source_hotspots($route, $limit = 10) {
+    $file = route_to_source_file($route);
+    if (!is_file($file)) {
+        return [
+            'file' => normalize_security_route($route),
+            'hotspots' => ['Source file not found for this route.']
+        ];
+    }
+
+    $patterns = '/\$_GET|\$_POST|\$_REQUEST|\$_FILES|->query\s*\(|mysqli_query|echo\s+|innerHTML|file_get_contents|curl_exec|shell_exec|exec\s*\(|system\s*\(|passthru|move_uploaded_file|include\s*\(|require\s*\(/i';
+    $lines = file($file, FILE_IGNORE_NEW_LINES);
+    $hotspots = [];
+    foreach ($lines as $idx => $line) {
+        if (preg_match($patterns, $line)) {
+            $hotspots[] = 'line ' . ($idx + 1) . ': ' . trim($line);
+            if (count($hotspots) >= $limit) break;
+        }
+    }
+
+    if (empty($hotspots)) {
+        $hotspots[] = 'No obvious risky sink found by static scan.';
+    }
+
+    $relative = str_replace('\\', '/', substr($file, strlen(realpath(__DIR__ . '/../')) + 1));
+    return [
+        'file' => 'app/' . $relative,
+        'hotspots' => $hotspots
+    ];
+}
+
+function load_code_hotspots_context($conn) {
+    $routes = [
+        '/login.php',
+        '/search.php',
+        '/index.php',
+        '/post.php',
+        '/messages.php',
+        '/api/get_messages.php',
+        '/api/send_message.php',
+        '/settings.php',
+        '/preview.php',
+        '/oauth.php',
+    ];
+
+    $res = $conn->query("
+        SELECT DISTINCT request_uri
+        FROM security_events
+        WHERE deleted_at IS NULL
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT 5
+    ");
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $route = normalize_security_route($row['request_uri'] ?? '');
+            if (!in_array($route, $routes, true)) $routes[] = $route;
+        }
+    }
+
+    $context = [];
+    foreach (array_slice($routes, 0, 14) as $route) {
+        $context[$route] = inspect_source_hotspots($route, 6);
+    }
+    return json_encode($context, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+}
+
+function infer_unknown_attack_research($payload) {
+    $p = strtolower(urldecode((string)$payload));
+    if (preg_match('/\{\{|\$\{|\bconstructor\b|\bprototype\b/', $p)) {
+        return [
+            'attack_name' => 'Template / Expression Injection',
+            'signature_hint' => 'Template markers such as {{...}}, ${...}, constructor, or prototype access',
+            'reference_url' => 'https://owasp.org/www-project-web-security-testing-guide/',
+            'fix_guidance' => 'Validate template input, never evaluate user-controlled expressions, escape output, and keep user data as plain text.'
+        ];
+    }
+    if (preg_match('/php:\/\/|data:|expect:|zip:|phar:/', $p)) {
+        return [
+            'attack_name' => 'PHP Stream Wrapper Abuse',
+            'signature_hint' => 'Dangerous wrapper schemes such as php://, data:, expect:, zip:, or phar:',
+            'reference_url' => 'https://owasp.org/www-community/attacks/Path_Traversal',
+            'fix_guidance' => 'Allowlist URL schemes and local paths, block PHP stream wrappers, and avoid passing user-controlled paths into file APIs.'
+        ];
+    }
+    if (preg_match('/\r|\n|%0d|%0a|set-cookie:|location:/', $p)) {
+        return [
+            'attack_name' => 'HTTP Header Injection',
+            'signature_hint' => 'CRLF/header tokens such as %0d%0a, Set-Cookie, or Location',
+            'reference_url' => 'https://owasp.org/www-community/attacks/HTTP_Response_Splitting',
+            'fix_guidance' => 'Reject CR/LF in header-bound values, use framework redirect helpers, and encode output before headers are emitted.'
+        ];
+    }
+    if (preg_match('/base64|eval|atob|fromcharcode|javascript:/', $p)) {
+        return [
+            'attack_name' => 'Obfuscated Script Injection',
+            'signature_hint' => 'Obfuscation tokens such as base64, eval, atob, fromCharCode, or javascript:',
+            'reference_url' => 'https://owasp.org/www-community/attacks/xss/',
+            'fix_guidance' => 'Escape output by context, sanitize allowed HTML, block dangerous URL schemes, and add a strict Content Security Policy.'
+        ];
+    }
+    return [
+        'attack_name' => 'Unknown Suspicious Web Payload',
+        'signature_hint' => 'Repeated suspicious payload fingerprint on this route',
+        'reference_url' => 'https://owasp.org/www-project-top-ten/',
+        'fix_guidance' => 'Review the highlighted source sinks, validate input by allowlist, use parameterized APIs, and encode output by context.'
+    ];
+}
+
+function gemini_research_unknown_attack($apiKey, $route, $payload, $hotspots) {
+    if (empty($apiKey)) return null;
+
+    $prompt = "Classify this suspicious web security event for a PHP lab. Use public web-security references such as OWASP or CWE when naming the issue. Return ONLY compact JSON with keys: attack_name, signature_hint, reference_url, fix_guidance.\n\nRoute: $route\nPayload:\n$payload\n\nRelevant source hotspots:\n" . implode("\n", $hotspots);
+    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=" . $apiKey;
+    $data = [
+        'contents' => [[
+            'role' => 'user',
+            'parts' => [['text' => $prompt]]
+        ]]
+    ];
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 12);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($httpCode !== 200 || !$response) return null;
+    $result = json_decode($response, true);
+    $text = $result['candidates'][0]['content']['parts'][0]['text'] ?? '';
+    $text = trim(preg_replace('/^```(?:json)?|```$/m', '', trim($text)));
+    $jsonStart = strpos($text, '{');
+    $jsonEnd = strrpos($text, '}');
+    if ($jsonStart === false || $jsonEnd === false) return null;
+    $parsed = json_decode(substr($text, $jsonStart, $jsonEnd - $jsonStart + 1), true);
+    if (!is_array($parsed) || empty($parsed['attack_name'])) return null;
+
+    return [
+        'attack_name' => substr((string)$parsed['attack_name'], 0, 120),
+        'signature_hint' => substr((string)($parsed['signature_hint'] ?? 'Gemini learned payload fingerprint'), 0, 255),
+        'reference_url' => substr((string)($parsed['reference_url'] ?? 'https://owasp.org/www-project-top-ten/'), 0, 255),
+        'fix_guidance' => (string)($parsed['fix_guidance'] ?? 'Validate input, avoid dangerous sinks, and encode output by context.')
+    ];
+}
+
 // 1. Save API Key Action
 if ($action === 'save_key') {
     $key = trim($input['key'] ?? '');
@@ -28,8 +213,8 @@ if ($action === 'save_key') {
         exit;
     }
     
-    // Save to database
-    $stmt = $conn->prepare("REPLACE INTO app_meta (meta_key, meta_value) VALUES ('gemini_api_key', ?)");
+    // Save to persistent agent config so Lab Reset does not erase the agent key.
+    $stmt = $conn->prepare("REPLACE INTO ai_agent_config (config_key, config_value) VALUES ('gemini_api_key', ?)");
     if ($stmt) {
         $stmt->bind_param('s', $key);
         if ($stmt->execute()) {
@@ -82,6 +267,8 @@ if ($action === 'chat') {
         }
     }
     $context = json_encode($recent_events, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    $agent_memory = load_agent_memory_context($conn);
+    $code_hotspots = load_code_hotspots_context($conn);
 
     // Context files structure to tell the agent where vulnerability entrypoints exist and how to test them
     $files_map = "
@@ -161,6 +348,12 @@ $files_map
 Recent system security events captured:
 $context
 
+Persistent agent memory retained across Lab Reset:
+$agent_memory
+
+Relevant source-code hotspots the agent should inspect when explaining fixes:
+$code_hotspots
+
 IMPORTANT FORMATTING RULE FOR SOURCE PATCHES:
 If you want to suggest a direct source code hotpatch, you MUST format it exactly like this in your markdown output, so the frontend UI can detect and apply it:
 
@@ -231,7 +424,64 @@ Make sure the [SEARCH] block matches the vulnerable code EXACTLY, including inde
     exit;
 }
 
-// 4. Apply Patch Action
+// 4. Learn unknown attack from an event and store the signature for future detections.
+if ($action === 'learn_unknown') {
+    $eventId = (int)($input['event_id'] ?? 0);
+    if ($eventId <= 0) {
+        echo json_encode(['error' => 'Invalid event id.']);
+        exit;
+    }
+
+    $res = $conn->query("SELECT * FROM security_events WHERE id=$eventId AND deleted_at IS NULL LIMIT 1");
+    if (!$res || $res->num_rows === 0) {
+        echo json_encode(['error' => 'Security event not found.']);
+        exit;
+    }
+
+    $event = $res->fetch_assoc();
+    $route = normalize_security_route($event['request_uri'] ?? '');
+    $payload = $event['payload'] ?? '';
+    $research = infer_unknown_attack_research($payload);
+    $hotspots = inspect_source_hotspots($route, 8);
+    $geminiResearch = gemini_research_unknown_attack(get_gemini_api_key($conn), $route, $payload, $hotspots['hotspots']);
+    if ($geminiResearch) {
+        $research = array_merge($research, $geminiResearch);
+    }
+    $admin_id = $_SESSION['user_id'] ?? null;
+    $code_location = $hotspots['file'];
+
+    remember_ai_attack_signature(
+        $conn,
+        $route,
+        $payload,
+        $research['attack_name'],
+        $research['signature_hint'],
+        $research['reference_url'],
+        $code_location,
+        $research['fix_guidance'],
+        $admin_id
+    );
+
+    $summary = 'AI learned ' . $research['attack_name'] . ' on ' . $route . '. Next matching payload on this route will be classified as AI Learned Attack.';
+    remember_ai_agent_fix($conn, 'learned_attack', $route, $summary, $admin_id, 'ConnectHub AI Agent', $research['reference_url']);
+
+    $safe_summary = $conn->real_escape_string($summary);
+    $conn->query("UPDATE security_events SET ai_fix_summary='$safe_summary' WHERE id=$eventId");
+
+    echo json_encode([
+        'success' => true,
+        'attack_name' => $research['attack_name'],
+        'route' => $route,
+        'code_location' => $code_location,
+        'hotspots' => $hotspots['hotspots'],
+        'reference_url' => $research['reference_url'],
+        'fix_guidance' => $research['fix_guidance'],
+        'message' => $summary
+    ]);
+    exit;
+}
+
+// 5. Apply Patch Action
 if ($action === 'apply_patch') {
     $filePath = trim($input['file_path'] ?? '');
     $searchCode = $input['search_code'] ?? '';
@@ -325,6 +575,7 @@ if ($action === 'apply_patch') {
         VALUES ('$event_type', '$route', 'Gemini AI Agent', 'https://ai.google.dev', '$summary', 1, $admin_id, NOW(), NOW())
         ON DUPLICATE KEY UPDATE is_active=1, fix_summary='$summary', updated_at=NOW()
     ");
+    remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id, 'Gemini AI Agent', 'https://ai.google.dev');
 
     echo json_encode([
         'success' => true,

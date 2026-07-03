@@ -37,6 +37,8 @@ function admin_event_label($type) {
         'path_traversal' => 'Path Traversal',
         'command_injection' => 'Command Injection',
         'ssrf_probe' => 'SSRF / Internal Access',
+        'unknown_attack' => 'Unknown Attack',
+        'learned_attack' => 'AI Learned Attack',
     ];
     return $labels[$type] ?? ucwords(str_replace('_', ' ', $type));
 }
@@ -92,6 +94,10 @@ function admin_upsert_ai_fix_rule($conn, $event_type, $route, $summary, $admin_i
     ");
 }
 
+function admin_remember_ai_fix($conn, $event_type, $route, $summary, $admin_id) {
+    remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id);
+}
+
 function admin_train_ai_fix_from_events($conn, $admin_id) {
     $attack_types = "'sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation'";
     $events = $conn->query("
@@ -112,12 +118,16 @@ function admin_train_ai_fix_from_events($conn, $admin_id) {
 
         $summary = admin_ai_fix_summary($event['event_type']);
         admin_upsert_ai_fix_rule($conn, $event['event_type'], $route, $summary, $admin_id);
+        admin_remember_ai_fix($conn, $event['event_type'], $route, $summary, $admin_id);
         if ($event['event_type'] === 'xss_probe' && $route === '/index.php') {
             admin_upsert_ai_fix_rule($conn, 'xss_probe', '/post.php', $summary, $admin_id);
             admin_upsert_ai_fix_rule($conn, 'xss_probe', '/profile.php', $summary, $admin_id);
+            admin_remember_ai_fix($conn, 'xss_probe', '/post.php', $summary, $admin_id);
+            admin_remember_ai_fix($conn, 'xss_probe', '/profile.php', $summary, $admin_id);
         }
         if ($event['event_type'] === 'xss_probe' && $route === '/messages.php') {
             admin_upsert_ai_fix_rule($conn, 'xss_probe', '/fetch_messages.php', $summary, $admin_id);
+            admin_remember_ai_fix($conn, 'xss_probe', '/fetch_messages.php', $summary, $admin_id);
         }
 
         $where = admin_event_group_where($conn, [
@@ -161,7 +171,9 @@ function admin_train_ai_fix_from_events($conn, $admin_id) {
         $key = $event_type . '|' . $route;
         if (isset($trained[$key])) continue;
         $trained[$key] = true;
-        admin_upsert_ai_fix_rule($conn, $event_type, $route, admin_ai_fix_summary($event_type), $admin_id);
+        $summary = admin_ai_fix_summary($event_type);
+        admin_upsert_ai_fix_rule($conn, $event_type, $route, $summary, $admin_id);
+        admin_remember_ai_fix($conn, $event_type, $route, $summary, $admin_id);
     }
 
     return count($trained);
@@ -329,6 +341,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 WHERE $where
             ");
             admin_upsert_ai_fix_rule($conn, $event['event_type'], $route, admin_ai_fix_summary($event['event_type']), $admin_id);
+            admin_remember_ai_fix($conn, $event['event_type'], $route, admin_ai_fix_summary($event['event_type']), $admin_id);
             $message = 'AI Fix applied. Duplicate events changed to fixed.';
         }
     } elseif ($action === 'train_ai_fix_all') {
@@ -480,7 +493,7 @@ $attack_events = $conn->query("
     FROM security_events se
     LEFT JOIN users u ON se.user_id = u.id
     WHERE se.deleted_at IS NULL
-      AND se.event_type IN ('sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation')
+      AND se.event_type IN ('sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation','unknown_attack','learned_attack')
     ORDER BY se.occurred_at DESC, se.id DESC
     LIMIT 120
 ");
@@ -1202,6 +1215,38 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
                         
                         handleChatSend(queryMessage);
                     };
+
+                    window.triggerAiLearnUnknown = function(eventId) {
+                        widget.classList.add('active');
+                        appendMessage('user', 'Learn new attack from event #' + eventId + ' and show the vulnerable code location.');
+
+                        fetch('api/ai_agent.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'learn_unknown', event_id: eventId })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (!data.success) {
+                                appendMessage('bot', 'Could not learn this event: ' + (data.error || 'Unknown error'));
+                                return;
+                            }
+
+                            const hotspots = (data.hotspots || []).map(line => '- ' + line).join('\n');
+                            appendMessage('bot',
+                                'Learned attack: ' + data.attack_name + '\n' +
+                                'Route: ' + data.route + '\n' +
+                                'Likely code file: ' + data.code_location + '\n\n' +
+                                'Code hotspots:\n' + hotspots + '\n\n' +
+                                'Reference: ' + data.reference_url + '\n' +
+                                'Fix guidance: ' + data.fix_guidance + '\n\n' +
+                                'Next time the same fingerprint appears on this route, IDS will classify it as AI Learned Attack.'
+                            );
+                        })
+                        .catch(err => {
+                            appendMessage('bot', 'Connection error while learning this attack: ' + err.message);
+                        });
+                    };
                 });
             </script>
 
@@ -1298,6 +1343,11 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
                                         <button type="button" class="btn btn-success btn-sm btn-glow" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
                                             <i class="fas fa-wand-magic-sparkles"></i> AI Fix
                                         </button>
+                                        <?php if ($event['event_type'] === 'unknown_attack'): ?>
+                                            <button type="button" class="btn btn-secondary btn-sm" onclick="triggerAiLearnUnknown('<?= htmlspecialchars((int)$event['id']) ?>')">
+                                                <i class="fas fa-graduation-cap"></i> Learn Attack
+                                            </button>
+                                        <?php endif; ?>
                                     <?php endif; ?>
 
                                     <?php if (!$event['resolved_at'] && !$event['ai_fixed_at']): ?>

@@ -105,6 +105,48 @@ function ensure_admin_schema($conn) {
     ");
 
     $conn->query("
+        CREATE TABLE IF NOT EXISTS ai_agent_memory (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            event_type VARCHAR(80) NOT NULL,
+            route VARCHAR(255) NOT NULL,
+            fix_summary TEXT,
+            source_name VARCHAR(120) DEFAULT 'ConnectHub AI Agent',
+            source_url VARCHAR(255) DEFAULT 'https://ai.google.dev',
+            learned_by INT NULL,
+            learned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_memory_event_route (event_type, route)
+        )
+    ");
+
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS ai_agent_config (
+            config_key VARCHAR(80) PRIMARY KEY,
+            config_value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    ");
+
+    $conn->query("
+        CREATE TABLE IF NOT EXISTS ai_attack_memory (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            fingerprint VARCHAR(64) NOT NULL,
+            route VARCHAR(255) NOT NULL,
+            event_type VARCHAR(80) NOT NULL DEFAULT 'learned_attack',
+            attack_name VARCHAR(120) NOT NULL,
+            signature_hint VARCHAR(255) NULL,
+            reference_url VARCHAR(255) NULL,
+            code_location VARCHAR(255) NULL,
+            fix_guidance TEXT NULL,
+            seen_count INT DEFAULT 1,
+            learned_by INT NULL,
+            learned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_attack_fingerprint_route (fingerprint, route)
+        )
+    ");
+
+    $conn->query("
         CREATE TABLE IF NOT EXISTS blocked_ips (
             id INT AUTO_INCREMENT PRIMARY KEY,
             ip_address VARCHAR(64) UNIQUE NOT NULL,
@@ -190,6 +232,92 @@ function ai_security_source_name() {
 
 function ai_security_source_url() {
     return 'https://github.com/GitHubSecurityLab/seclab-taskflow-agent';
+}
+
+function remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id = null, $source_name = null, $source_url = null) {
+    $event_type = $conn->real_escape_string($event_type);
+    $route = $conn->real_escape_string($route);
+    $summary = $conn->real_escape_string($summary);
+    $source_name = $conn->real_escape_string($source_name ?: ai_security_source_name());
+    $source_url = $conn->real_escape_string($source_url ?: ai_security_source_url());
+    $learned_by = $admin_id ? (int)$admin_id : 'NULL';
+
+    return $conn->query("
+        INSERT INTO ai_agent_memory (event_type, route, fix_summary, source_name, source_url, learned_by, learned_at, updated_at)
+        VALUES ('$event_type', '$route', '$summary', '$source_name', '$source_url', $learned_by, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+            fix_summary=VALUES(fix_summary),
+            source_name=VALUES(source_name),
+            source_url=VALUES(source_url),
+            learned_by=VALUES(learned_by),
+            updated_at=NOW()
+    ");
+}
+
+function ai_payload_fingerprint($payload) {
+    $decoded = urldecode(strtolower((string)$payload));
+    $decoded = preg_replace('/[a-z0-9_]{12,}/i', '{token}', $decoded);
+    $decoded = preg_replace('/\d+/', '{n}', $decoded);
+    $decoded = preg_replace('/\s+/', ' ', $decoded);
+    return hash('sha256', trim($decoded));
+}
+
+function ai_payload_looks_unknown_suspicious($payload) {
+    $payload = strtolower((string)$payload);
+    $signals = [
+        '/%[0-9a-f]{2}/i',
+        '/\bselect\b|\binsert\b|\bupdate\b|\bdelete\b|\bdrop\b/i',
+        '/<[^>]+>/',
+        '/\bbase64\b|\beval\b|\bexec\b|\bsystem\b|\bpassthru\b/i',
+        '/\.\.|\bcmd\b|\bpowershell\b|\bphp:\/\/|\bdata:|\bexpect:|\bzip:|\bphar:/i',
+        '/\{\{|\$\{|\bconstructor\b|\bprototype\b/i',
+    ];
+    foreach ($signals as $pattern) {
+        if (preg_match($pattern, $payload)) return true;
+    }
+    return false;
+}
+
+function ai_known_attack_from_memory($conn, $route, $payload) {
+    $fingerprint = $conn->real_escape_string(ai_payload_fingerprint($payload));
+    $safe_route = $conn->real_escape_string(normalize_security_route($route));
+    $res = $conn->query("
+        SELECT *
+        FROM ai_attack_memory
+        WHERE fingerprint='$fingerprint' AND route='$safe_route'
+        LIMIT 1
+    ");
+    if ($res && $res->num_rows > 0) {
+        $memory = $res->fetch_assoc();
+        $id = (int)$memory['id'];
+        $conn->query("UPDATE ai_attack_memory SET seen_count=seen_count+1, updated_at=NOW() WHERE id=$id");
+        return $memory;
+    }
+    return null;
+}
+
+function remember_ai_attack_signature($conn, $route, $payload, $attack_name, $signature_hint, $reference_url, $code_location, $fix_guidance, $admin_id = null) {
+    $fingerprint = $conn->real_escape_string(ai_payload_fingerprint($payload));
+    $route = $conn->real_escape_string(normalize_security_route($route));
+    $attack_name = $conn->real_escape_string(substr($attack_name, 0, 120));
+    $signature_hint = $conn->real_escape_string(substr($signature_hint, 0, 255));
+    $reference_url = $conn->real_escape_string(substr($reference_url, 0, 255));
+    $code_location = $conn->real_escape_string(substr($code_location, 0, 255));
+    $fix_guidance = $conn->real_escape_string($fix_guidance);
+    $learned_by = $admin_id ? (int)$admin_id : 'NULL';
+
+    return $conn->query("
+        INSERT INTO ai_attack_memory (fingerprint, route, event_type, attack_name, signature_hint, reference_url, code_location, fix_guidance, seen_count, learned_by, learned_at, updated_at)
+        VALUES ('$fingerprint', '$route', 'learned_attack', '$attack_name', '$signature_hint', '$reference_url', '$code_location', '$fix_guidance', 1, $learned_by, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+            attack_name=VALUES(attack_name),
+            signature_hint=VALUES(signature_hint),
+            reference_url=VALUES(reference_url),
+            code_location=VALUES(code_location),
+            fix_guidance=VALUES(fix_guidance),
+            learned_by=VALUES(learned_by),
+            updated_at=NOW()
+    ");
 }
 
 function normalize_security_route($uri = null) {
@@ -412,6 +540,30 @@ function inspect_request_for_intrusion($conn) {
             log_security_event($conn, $check[0], $check[1], $check[3], implode("\n", $parts));
             return;
         }
+    }
+
+    $raw_payload = implode("\n", $parts);
+    $route = normalize_security_route();
+    $memory = ai_known_attack_from_memory($conn, $route, $raw_payload);
+    if ($memory) {
+        log_security_event(
+            $conn,
+            'learned_attack',
+            'high',
+            'AI learned attack: ' . $memory['attack_name'] . ' - ' . ($memory['fix_guidance'] ?: 'Known pattern from agent memory'),
+            $raw_payload
+        );
+        return;
+    }
+
+    if (ai_payload_looks_unknown_suspicious($raw_payload)) {
+        log_security_event(
+            $conn,
+            'unknown_attack',
+            'medium',
+            'Unknown suspicious payload. Ask the AI Agent to research and learn this pattern.',
+            $raw_payload
+        );
     }
 }
 
