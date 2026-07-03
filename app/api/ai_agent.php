@@ -7,9 +7,9 @@ header('Content-Type: application/json; charset=utf-8');
 $input = json_decode(file_get_contents('php://input'), true);
 $action = $input['action'] ?? '';
 
-// Retrieve Gemini API Key from agent config, with legacy app_meta fallback.
-function get_gemini_api_key($conn) {
-    $stmt = $conn->prepare("SELECT config_value FROM ai_agent_config WHERE config_key = 'gemini_api_key' LIMIT 1");
+// Retrieve OpenAI API Key from agent config.
+function get_openai_api_key($conn) {
+    $stmt = $conn->prepare("SELECT config_value FROM ai_agent_config WHERE config_key = 'openai_api_key' LIMIT 1");
     if ($stmt) {
         $stmt->execute();
         $res = $stmt->get_result();
@@ -17,16 +17,59 @@ function get_gemini_api_key($conn) {
             return $row['config_value'];
         }
     }
+    return '';
+}
 
-    $stmt = $conn->prepare("SELECT meta_value FROM app_meta WHERE meta_key = 'gemini_api_key' LIMIT 1");
+function allowed_openai_models() {
+    return [
+        'gpt-5.4-mini' => 'GPT-5.4 mini - balanced',
+        'gpt-5.4' => 'GPT-5.4 - stronger coding',
+        'gpt-5.5' => 'GPT-5.5 - latest flagship',
+        'gpt-5.4-nano' => 'GPT-5.4 nano - fastest/cheapest',
+        'gpt-4.1-mini' => 'GPT-4.1 mini - fallback',
+        'gpt-4o-mini' => 'GPT-4o mini - legacy fallback',
+    ];
+}
+
+function normalize_openai_model($model) {
+    $model = trim((string)$model);
+    $model = preg_replace('/[^a-zA-Z0-9._:-]/', '', $model);
+    return $model !== '' ? $model : 'gpt-5.4-mini';
+}
+
+function get_openai_model($conn) {
+    $stmt = $conn->prepare("SELECT config_value FROM ai_agent_config WHERE config_key = 'openai_model' LIMIT 1");
     if ($stmt) {
         $stmt->execute();
         $res = $stmt->get_result();
         if ($res && $row = $res->fetch_assoc()) {
-            return $row['meta_value'];
+            return normalize_openai_model($row['config_value']);
         }
     }
-    return '';
+    return 'gpt-5.4-mini';
+}
+
+function save_openai_model($conn, $model) {
+    $model = normalize_openai_model($model);
+    $stmt = $conn->prepare("REPLACE INTO ai_agent_config (config_key, config_value) VALUES ('openai_model', ?)");
+    if (!$stmt) return false;
+    $stmt->bind_param('s', $model);
+    return $stmt->execute();
+}
+
+function openai_responses_url() {
+    return 'https://api.openai.com/v1/responses';
+}
+
+function openai_extract_text($result) {
+    if (!empty($result['output_text'])) return $result['output_text'];
+    $parts = [];
+    foreach (($result['output'] ?? []) as $item) {
+        foreach (($item['content'] ?? []) as $content) {
+            if (isset($content['text'])) $parts[] = $content['text'];
+        }
+    }
+    return trim(implode("\n", $parts));
 }
 
 function load_agent_memory_context($conn) {
@@ -165,23 +208,32 @@ function infer_unknown_attack_research($payload) {
     ];
 }
 
-function gemini_research_unknown_attack($apiKey, $route, $payload, $hotspots) {
+function openai_research_unknown_attack($apiKey, $model, $route, $payload, $hotspots) {
     if (empty($apiKey)) return null;
 
     $prompt = "Classify this suspicious web security event for a PHP lab. Use public web-security references such as OWASP or CWE when naming the issue. Return ONLY compact JSON with keys: attack_name, signature_hint, reference_url, fix_guidance.\n\nRoute: $route\nPayload:\n$payload\n\nRelevant source hotspots:\n" . implode("\n", $hotspots);
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=" . $apiKey;
+    $url = openai_responses_url();
     $data = [
-        'contents' => [[
-            'role' => 'user',
-            'parts' => [['text' => $prompt]]
-        ]]
+        'model' => normalize_openai_model($model),
+        'input' => [
+            [
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'input_text', 'text' => $prompt]
+                ]
+            ]
+        ],
+        'max_output_tokens' => 700,
     ];
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $apiKey
+    ]);
     curl_setopt($ch, CURLOPT_TIMEOUT, 12);
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -189,7 +241,7 @@ function gemini_research_unknown_attack($apiKey, $route, $payload, $hotspots) {
 
     if ($httpCode !== 200 || !$response) return null;
     $result = json_decode($response, true);
-    $text = $result['candidates'][0]['content']['parts'][0]['text'] ?? '';
+    $text = openai_extract_text($result);
     $text = trim(preg_replace('/^```(?:json)?|```$/m', '', trim($text)));
     $jsonStart = strpos($text, '{');
     $jsonEnd = strrpos($text, '}');
@@ -199,7 +251,7 @@ function gemini_research_unknown_attack($apiKey, $route, $payload, $hotspots) {
 
     return [
         'attack_name' => substr((string)$parsed['attack_name'], 0, 120),
-        'signature_hint' => substr((string)($parsed['signature_hint'] ?? 'Gemini learned payload fingerprint'), 0, 255),
+        'signature_hint' => substr((string)($parsed['signature_hint'] ?? 'OpenAI learned payload fingerprint'), 0, 255),
         'reference_url' => substr((string)($parsed['reference_url'] ?? 'https://owasp.org/www-project-top-ten/'), 0, 255),
         'fix_guidance' => (string)($parsed['fix_guidance'] ?? 'Validate input, avoid dangerous sinks, and encode output by context.')
     ];
@@ -214,7 +266,7 @@ if ($action === 'save_key') {
     }
     
     // Save to persistent agent config so Lab Reset does not erase the agent key.
-    $stmt = $conn->prepare("REPLACE INTO ai_agent_config (config_key, config_value) VALUES ('gemini_api_key', ?)");
+    $stmt = $conn->prepare("REPLACE INTO ai_agent_config (config_key, config_value) VALUES ('openai_api_key', ?)");
     if ($stmt) {
         $stmt->bind_param('s', $key);
         if ($stmt->execute()) {
@@ -228,21 +280,36 @@ if ($action === 'save_key') {
     exit;
 }
 
+// 1b. Save Model Action
+if ($action === 'save_model') {
+    $model = normalize_openai_model($input['model'] ?? '');
+    if (save_openai_model($conn, $model)) {
+        echo json_encode(['success' => true, 'message' => 'Model updated successfully!', 'model' => $model]);
+    } else {
+        echo json_encode(['error' => 'Database error saving model.']);
+    }
+    exit;
+}
+
 // 2. Get API Key Status Action
 if ($action === 'get_key_status') {
-    $key = get_gemini_api_key($conn);
+    $key = get_openai_api_key($conn);
+    $model = get_openai_model($conn);
     echo json_encode([
         'configured' => !empty($key),
-        'masked_key' => !empty($key) ? substr($key, 0, 6) . '...' . substr($key, -4) : ''
+        'masked_key' => !empty($key) ? substr($key, 0, 6) . '...' . substr($key, -4) : '',
+        'model' => $model,
+        'models' => allowed_openai_models()
     ]);
     exit;
 }
 
 // 3. Chat Action
 if ($action === 'chat') {
-    $apiKey = get_gemini_api_key($conn);
+    $apiKey = get_openai_api_key($conn);
+    $model = get_openai_model($conn);
     if (empty($apiKey)) {
-        echo json_encode(['error' => 'Gemini API Key is not configured. Please open settings inside the Chatbox and enter your key.']);
+        echo json_encode(['error' => 'OpenAI API Key is not configured. Please open settings inside the Chatbox and enter your key.']);
         exit;
     }
 
@@ -373,23 +440,26 @@ If you want to suggest a direct source code hotpatch, you MUST format it exactly
 
 Make sure the [SEARCH] block matches the vulnerable code EXACTLY, including indentation. Keep the patches clean, correct, and robust. Always explain what the vulnerability was and how your patch remediates it.";
 
-    // Call Gemini API (3.5 Flash)
-    $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=" . $apiKey;
+    // Call selected OpenAI ChatGPT model through Responses API.
+    $url = openai_responses_url();
     
     $data = [
-        'contents' => [
+        'model' => normalize_openai_model($model),
+        'input' => [
+            [
+                'role' => 'developer',
+                'content' => [
+                    ['type' => 'input_text', 'text' => $systemInstruction]
+                ]
+            ],
             [
                 'role' => 'user',
-                'parts' => [
-                    ['text' => $message]
+                'content' => [
+                    ['type' => 'input_text', 'text' => $message]
                 ]
             ]
         ],
-        'systemInstruction' => [
-            'parts' => [
-                ['text' => $systemInstruction]
-            ]
-        ]
+        'max_output_tokens' => 2200,
     ];
 
     $ch = curl_init($url);
@@ -397,7 +467,8 @@ Make sure the [SEARCH] block matches the vulnerable code EXACTLY, including inde
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Content-Type: application/json'
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $apiKey
     ]);
 
     $response = curl_exec($ch);
@@ -412,13 +483,13 @@ Make sure the [SEARCH] block matches the vulnerable code EXACTLY, including inde
 
     if ($httpCode !== 200) {
         $errorRes = json_decode($response, true);
-        $errMsg = $errorRes['error']['message'] ?? 'Gemini API returned HTTP ' . $httpCode;
-        echo json_encode(['error' => 'Gemini API error: ' . $errMsg]);
+        $errMsg = $errorRes['error']['message'] ?? 'OpenAI API returned HTTP ' . $httpCode;
+        echo json_encode(['error' => 'OpenAI API error: ' . $errMsg]);
         exit;
     }
 
     $result = json_decode($response, true);
-    $reply = $result['candidates'][0]['content']['parts'][0]['text'] ?? 'Could not parse response from Gemini API.';
+    $reply = openai_extract_text($result) ?: 'Could not parse response from OpenAI API.';
     
     echo json_encode(['reply' => $reply]);
     exit;
@@ -443,9 +514,9 @@ if ($action === 'learn_unknown') {
     $payload = $event['payload'] ?? '';
     $research = infer_unknown_attack_research($payload);
     $hotspots = inspect_source_hotspots($route, 8);
-    $geminiResearch = gemini_research_unknown_attack(get_gemini_api_key($conn), $route, $payload, $hotspots['hotspots']);
-    if ($geminiResearch) {
-        $research = array_merge($research, $geminiResearch);
+    $openaiResearch = openai_research_unknown_attack(get_openai_api_key($conn), get_openai_model($conn), $route, $payload, $hotspots['hotspots']);
+    if ($openaiResearch) {
+        $research = array_merge($research, $openaiResearch);
     }
     $admin_id = $_SESSION['user_id'] ?? null;
     $code_location = $hotspots['file'];
@@ -569,13 +640,13 @@ if ($action === 'apply_patch') {
     else if (strpos($filePath, 'messages.php') !== false) $event_type = 'idor_messages';
     
     $route = '/' . $filePath;
-    $summary = $conn->real_escape_string("Source code patch applied directly via Gemini AI Agent.");
+    $summary = $conn->real_escape_string("Source code patch applied directly via ConnectHub Sentinel using OpenAI.");
     $conn->query("
         INSERT INTO ai_fix_rules (event_type, route, source_name, source_url, fix_summary, is_active, created_by, created_at, updated_at)
-        VALUES ('$event_type', '$route', 'Gemini AI Agent', 'https://ai.google.dev', '$summary', 1, $admin_id, NOW(), NOW())
+        VALUES ('$event_type', '$route', 'ConnectHub Sentinel', 'https://platform.openai.com/docs', '$summary', 1, $admin_id, NOW(), NOW())
         ON DUPLICATE KEY UPDATE is_active=1, fix_summary='$summary', updated_at=NOW()
     ");
-    remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id, 'Gemini AI Agent', 'https://ai.google.dev');
+    remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id, 'ConnectHub Sentinel', 'https://platform.openai.com/docs');
 
     echo json_encode([
         'success' => true,

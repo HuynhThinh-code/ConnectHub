@@ -970,7 +970,10 @@ $ai_fix_rules = $conn->query("
                     const settingsToggle = document.getElementById('aiSettingsToggle');
                     const settingsPanel = document.getElementById('aiSettingsPanel');
                     const saveKeyBtn = document.getElementById('saveApiKeyBtn');
-                    const apiKeyInput = document.getElementById('geminiApiKeyInput');
+                    const apiKeyInput = document.getElementById('openaiApiKeyInput');
+                    const modelSelect = document.getElementById('openaiModelSelect');
+                    const customModelInput = document.getElementById('openaiCustomModelInput');
+                    const saveModelBtn = document.getElementById('saveModelBtn');
                     const keyStatus = document.getElementById('apiKeyStatus');
                     const chatMessages = document.getElementById('aiChatMessages');
                     const chatInput = document.getElementById('aiChatInput');
@@ -1001,9 +1004,24 @@ $ai_fix_rules = $conn->query("
                         .then(res => res.json())
                         .then(data => {
                             if (data.configured) {
-                                keyStatus.innerHTML = '<span style="color:#10b981;"><i class="fas fa-check-circle"></i> Key Active: ' + data.masked_key + '</span>';
+                                keyStatus.innerHTML = '<span style="color:#10b981;"><i class="fas fa-check-circle"></i> OpenAI Key Active: ' + data.masked_key + '</span><br><span style="color:#6b7280;">Model: <code>' + escapeHtml(data.model || 'gpt-5.4-mini') + '</code></span>';
                             } else {
-                                keyStatus.innerHTML = '<span style="color:#ef4444;"><i class="fas fa-exclamation-circle"></i> API Key Not Configured</span>';
+                                keyStatus.innerHTML = '<span style="color:#ef4444;"><i class="fas fa-exclamation-circle"></i> OpenAI API Key Not Configured</span><br><span style="color:#6b7280;">Model: <code>' + escapeHtml(data.model || 'gpt-5.4-mini') + '</code></span>';
+                            }
+
+                            if (modelSelect && data.models) {
+                                modelSelect.innerHTML = '';
+                                Object.keys(data.models).forEach(modelId => {
+                                    const option = document.createElement('option');
+                                    option.value = modelId;
+                                    option.textContent = data.models[modelId] + ' (' + modelId + ')';
+                                    if (modelId === data.model) option.selected = true;
+                                    modelSelect.appendChild(option);
+                                });
+                                const customOption = document.createElement('option');
+                                customOption.value = '__custom__';
+                                customOption.textContent = 'Custom model name...';
+                                modelSelect.appendChild(customOption);
                             }
                         });
                     }
@@ -1033,6 +1051,34 @@ $ai_fix_rules = $conn->query("
                         })
                         .catch(() => {
                             saveKeyBtn.disabled = false;
+                        });
+                    });
+
+                    modelSelect.addEventListener('change', () => {
+                        customModelInput.style.display = modelSelect.value === '__custom__' ? 'block' : 'none';
+                    });
+
+                    saveModelBtn.addEventListener('click', () => {
+                        const selectedModel = modelSelect.value === '__custom__' ? customModelInput.value.trim() : modelSelect.value;
+                        if (!selectedModel) return;
+                        saveModelBtn.disabled = true;
+                        fetch('api/ai_agent.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: 'save_model', model: selectedModel })
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            saveModelBtn.disabled = false;
+                            if (data.success) {
+                                loadApiKeyStatus();
+                                appendMessage('bot', 'Model updated: ' + data.model);
+                            } else {
+                                alert(data.error || 'Failed to save model.');
+                            }
+                        })
+                        .catch(() => {
+                            saveModelBtn.disabled = false;
                         });
                     });
 
@@ -1098,7 +1144,7 @@ $ai_fix_rules = $conn->query("
                             parsed = parsed.replace(/`([^`]+)`/g, '<code>$1</code>');
                             parsed = parsed.replace(/\n/g, '<br>');
                             
-                            bubble.innerHTML = '<strong>Gemini Agent:</strong><br>' + parsed + patchCardHtml;
+                            bubble.innerHTML = '<strong>ConnectHub Sentinel:</strong><br>' + parsed + patchCardHtml;
                         } else {
                             bubble.innerHTML = '<strong>Bạn:</strong><br>' + escapeHtml(text).replace(/\n/g, '<br>');
                         }
@@ -1168,7 +1214,7 @@ $ai_fix_rules = $conn->query("
                         const typing = document.createElement('div');
                         typing.className = 'ai-bubble bot';
                         typing.innerHTML = `
-                            <strong>Gemini Agent:</strong><br>
+                            <strong>ConnectHub Sentinel:</strong><br>
                             <div class="typing-indicator">
                                 <span></span><span></span><span></span>
                             </div>
@@ -1465,7 +1511,7 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
     <div class="ai-chat-header">
         <div class="ai-chat-header-title">
             <i class="fas fa-shield-halved text-primary-light"></i>
-            <span>Gemini Security Agent</span>
+            <span>ConnectHub Sentinel</span>
         </div>
         <div class="ai-chat-header-actions">
             <button class="ai-chat-header-btn" id="aiSettingsToggle" title="Settings">
@@ -1477,13 +1523,21 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
         </div>
     </div>
 
-    <!-- API Key Configuration Settings Panel -->
+    <!-- AI Agent Configuration Settings Panel -->
     <div class="ai-settings-panel" id="aiSettingsPanel">
-        <h4 style="margin: 0 0 10px 0;"><i class="fas fa-key"></i> Gemini API Key</h4>
-        <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">Get a Gemini API Key from Google AI Studio and save it here.</p>
+        <h4 style="margin: 0 0 10px 0;"><i class="fas fa-shield-halved"></i> ConnectHub Sentinel</h4>
+        <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">Enter your OpenAI API key for ChatGPT models.</p>
         <div style="display: flex; gap: 8px;">
-            <input type="password" id="geminiApiKeyInput" class="form-control" placeholder="AIzaSy..." style="flex:1;">
+            <input type="password" id="openaiApiKeyInput" class="form-control" placeholder="sk-..." style="flex:1;">
             <button id="saveApiKeyBtn" class="btn btn-primary btn-sm">Save</button>
+        </div>
+        <div style="display: grid; gap: 8px; margin-top: 12px;">
+            <label for="openaiModelSelect" style="font-size: 0.8rem; font-weight: 700;">ChatGPT Model</label>
+            <select id="openaiModelSelect" class="form-control">
+                <option value="gpt-5.4-mini">GPT-5.4 mini</option>
+            </select>
+            <input type="text" id="openaiCustomModelInput" class="form-control" placeholder="Custom model id, e.g. gpt-5.4-mini" style="display:none;">
+            <button id="saveModelBtn" class="btn btn-secondary btn-sm" type="button">Save Model</button>
         </div>
         <div id="apiKeyStatus" style="font-size: 0.8rem; margin-top: 8px; font-weight: 500;">Checking Key status...</div>
     </div>
@@ -1491,7 +1545,7 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
     <!-- Chats History -->
     <div class="ai-chat-messages-area" id="aiChatMessages">
         <div class="ai-bubble bot">
-            <strong>Gemini Agent:</strong> Xin chào! Tôi là AI Agent bảo mật. Tôi có thể giúp bạn vá các lỗ hổng (SQLi, XSS, SSRF, Command Injection...) trực tiếp trên Lab này. Hãy hỏi tôi hoặc bấm nút <strong>AI Fix</strong> ở các sự kiện tấn công phát hiện được.
+            <strong>ConnectHub Sentinel:</strong> Xin chào! Tôi là agent bảo mật của ConnectHub. Tôi có thể phân tích lỗi, tìm vị trí code nghi ngờ, học attack mới và đề xuất cách fix cho lab này.
         </div>
     </div>
 
