@@ -970,9 +970,9 @@ $ai_fix_rules = $conn->query("
                     const settingsToggle = document.getElementById('aiSettingsToggle');
                     const settingsPanel = document.getElementById('aiSettingsPanel');
                     const saveKeyBtn = document.getElementById('saveApiKeyBtn');
-                    const apiKeyInput = document.getElementById('openaiApiKeyInput');
-                    const modelSelect = document.getElementById('openaiModelSelect');
-                    const customModelInput = document.getElementById('openaiCustomModelInput');
+                    const apiKeyInput = document.getElementById('geminiApiKeyInput');
+                    const modelSelect = document.getElementById('geminiModelSelect');
+                    const customModelInput = document.getElementById('geminiCustomModelInput');
                     const saveModelBtn = document.getElementById('saveModelBtn');
                     const keyStatus = document.getElementById('apiKeyStatus');
                     const chatMessages = document.getElementById('aiChatMessages');
@@ -1004,9 +1004,9 @@ $ai_fix_rules = $conn->query("
                         .then(res => res.json())
                         .then(data => {
                             if (data.configured) {
-                                keyStatus.innerHTML = '<span style="color:#10b981;"><i class="fas fa-check-circle"></i> OpenAI Key Active: ' + data.masked_key + '</span><br><span style="color:#6b7280;">Model: <code>' + escapeHtml(data.model || 'gpt-5.4-mini') + '</code></span>';
+                                keyStatus.innerHTML = '<span style="color:#10b981;"><i class="fas fa-check-circle"></i> Gemini Key Active: ' + data.masked_key + '</span><br><span style="color:#6b7280;">Model: <code>' + escapeHtml(data.model || 'gemini-2.5-flash') + '</code></span>';
                             } else {
-                                keyStatus.innerHTML = '<span style="color:#ef4444;"><i class="fas fa-exclamation-circle"></i> OpenAI API Key Not Configured</span><br><span style="color:#6b7280;">Model: <code>' + escapeHtml(data.model || 'gpt-5.4-mini') + '</code></span>';
+                                keyStatus.innerHTML = '<span style="color:#ef4444;"><i class="fas fa-exclamation-circle"></i> Gemini API Key Not Configured</span><br><span style="color:#6b7280;">Model: <code>' + escapeHtml(data.model || 'gemini-2.5-flash') + '</code></span>';
                             }
 
                             if (modelSelect && data.models) {
@@ -1526,17 +1526,17 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
     <!-- AI Agent Configuration Settings Panel -->
     <div class="ai-settings-panel" id="aiSettingsPanel">
         <h4 style="margin: 0 0 10px 0;"><i class="fas fa-shield-halved"></i> ConnectHub Sentinel</h4>
-        <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">Enter your OpenAI API key for ChatGPT models.</p>
+        <p class="text-muted" style="font-size: 0.8rem; margin-bottom: 12px;">Enter your Gemini API key from Google AI Studio.</p>
         <div style="display: flex; gap: 8px;">
-            <input type="password" id="openaiApiKeyInput" class="form-control" placeholder="sk-..." style="flex:1;">
+            <input type="password" id="geminiApiKeyInput" class="form-control" placeholder="AIzaSy..." style="flex:1;">
             <button id="saveApiKeyBtn" class="btn btn-primary btn-sm">Save</button>
         </div>
         <div style="display: grid; gap: 8px; margin-top: 12px;">
-            <label for="openaiModelSelect" style="font-size: 0.8rem; font-weight: 700;">ChatGPT Model</label>
-            <select id="openaiModelSelect" class="form-control">
-                <option value="gpt-5.4-mini">GPT-5.4 mini</option>
+            <label for="geminiModelSelect" style="font-size: 0.8rem; font-weight: 700;">Gemini Model</label>
+            <select id="geminiModelSelect" class="form-control">
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
             </select>
-            <input type="text" id="openaiCustomModelInput" class="form-control" placeholder="Custom model id, e.g. gpt-5.4-mini" style="display:none;">
+            <input type="text" id="geminiCustomModelInput" class="form-control" placeholder="Custom model id, e.g. gemini-2.5-flash" style="display:none;">
             <button id="saveModelBtn" class="btn btn-secondary btn-sm" type="button">Save Model</button>
         </div>
         <div id="apiKeyStatus" style="font-size: 0.8rem; margin-top: 8px; font-weight: 500;">Checking Key status...</div>
