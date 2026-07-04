@@ -64,6 +64,39 @@ function gemini_extract_text($result) {
     return $result['candidates'][0]['content']['parts'][0]['text'] ?? '';
 }
 
+function infer_event_type_from_file_path($filePath) {
+    if (strpos($filePath, 'login.php') !== false) return 'sql_injection';
+    if (strpos($filePath, 'search.php') !== false) return 'sql_injection';
+    if (strpos($filePath, 'settings.php') !== false) return 'command_injection';
+    if (strpos($filePath, 'preview.php') !== false) return 'ssrf_probe';
+    if (strpos($filePath, 'oauth.php') !== false) return 'oauth_scope_escalation';
+    if (strpos($filePath, 'messages.php') !== false) return 'idor_messages';
+    if (strpos($filePath, 'get_messages.php') !== false) return 'idor_messages';
+    if (strpos($filePath, 'send_message.php') !== false) return 'idor_messages';
+    if (strpos($filePath, 'index.php') !== false) return 'xss_probe';
+    if (strpos($filePath, 'post.php') !== false) return 'xss_probe';
+    if (strpos($filePath, 'profile.php') !== false) return 'private_disclosure';
+    return 'code_patch';
+}
+
+function apply_ai_fix_rule_for_file($conn, $filePath, $admin_id, $summary = null) {
+    $event_type = infer_event_type_from_file_path($filePath);
+    $route = '/' . ltrim(str_replace('\\', '/', $filePath), '/');
+    $summary = $summary ?: 'Quick Protect rule applied because the generated source patch did not match the current file exactly.';
+    $safe_type = $conn->real_escape_string($event_type);
+    $safe_route = $conn->real_escape_string($route);
+    $safe_summary = $conn->real_escape_string($summary);
+
+    $conn->query("
+        INSERT INTO ai_fix_rules (event_type, route, source_name, source_url, fix_summary, is_active, created_by, created_at, updated_at)
+        VALUES ('$safe_type', '$safe_route', 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs', '$safe_summary', 1, $admin_id, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE is_active=1, fix_summary='$safe_summary', updated_at=NOW()
+    ");
+    remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id, 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs');
+
+    return [$event_type, $route];
+}
+
 function load_agent_memory_context($conn) {
     $memories = [];
     $res = $conn->query("
@@ -583,9 +616,25 @@ if ($action === 'apply_patch') {
         // Try searching without trailing/leading whitespace mismatches
         $trimmedContent = trim($normalizedContent);
         $trimmedSearch = trim($normalizedSearch);
+        $trimmedReplace = trim($normalizedReplace);
         if (strpos($trimmedContent, $trimmedSearch) === false) {
+            $admin_id = $_SESSION['user_id'] ?? 0;
+            [$event_type, $route] = apply_ai_fix_rule_for_file(
+                $conn,
+                $filePath,
+                $admin_id,
+                'Source patch did not match current code exactly, so ConnectHub Sentinel activated the existing Quick Protect path for this route.'
+            );
+            $safe_file_path = $conn->real_escape_string($filePath);
+            $safe_payload = $conn->real_escape_string('Route: ' . $route . '; Type: ' . $event_type);
+            $conn->query("
+                INSERT INTO security_events (user_id, actor_username, ip_address, event_type, severity, details, payload, occurred_at)
+                VALUES ($admin_id, 'AI Agent', '127.0.0.1', 'quick_protect_applied_without_patch', 'medium', 'Quick Protect rule activated because source patch did not match $safe_file_path', '$safe_payload', NOW())
+            ");
             echo json_encode([
-                'error' => 'Could not locate the exact vulnerable block inside the file. Please check if the patch code has already been applied or contains a discrepancy.'
+                'success' => true,
+                'fallback_rule' => true,
+                'message' => 'The generated source patch did not match the current file exactly, so Sentinel activated Quick Protect for ' . htmlspecialchars($route) . ' instead. This route is now protected by the existing lab rule path.'
             ]);
             exit;
         }
@@ -595,9 +644,10 @@ if ($action === 'apply_patch') {
         $normalizedContent = str_replace($normalizedSearch, $trimmedReplace ?? $normalizedReplace, $normalizedContent);
     }
 
-    // Create a backup file first
+    // Create the first backup only. Keeping the original .bak lets Reset Lab State
+    // restore the vulnerable lab code even after multiple AI source patches.
     $backupPath = $targetPath . '.bak';
-    if (!copy($targetPath, $backupPath)) {
+    if (!file_exists($backupPath) && !copy($targetPath, $backupPath)) {
         echo json_encode(['error' => 'Could not create a safety backup copy of the target file. Check write permissions.']);
         exit;
     }
@@ -615,23 +665,8 @@ if ($action === 'apply_patch') {
         VALUES ($admin_id, 'AI Agent', '127.0.0.1', 'ai_hotpatch_applied', 'medium', 'AI Agent successfully hotpatched $filePath', 'File: $filePath', NOW())
     ");
 
-    // Also register an AI Fix rule so the custom rules display shows it protected
-    $event_type = 'code_patch';
-    if (strpos($filePath, 'login.php') !== false) $event_type = 'sql_injection';
-    else if (strpos($filePath, 'search.php') !== false) $event_type = 'sql_injection';
-    else if (strpos($filePath, 'settings.php') !== false) $event_type = 'command_injection';
-    else if (strpos($filePath, 'preview.php') !== false) $event_type = 'ssrf_probe';
-    else if (strpos($filePath, 'oauth.php') !== false) $event_type = 'oauth_scope_escalation';
-    else if (strpos($filePath, 'messages.php') !== false) $event_type = 'idor_messages';
-    
-    $route = '/' . $filePath;
-    $summary = $conn->real_escape_string("Source code patch applied directly via ConnectHub Sentinel using Gemini.");
-    $conn->query("
-        INSERT INTO ai_fix_rules (event_type, route, source_name, source_url, fix_summary, is_active, created_by, created_at, updated_at)
-        VALUES ('$event_type', '$route', 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs', '$summary', 1, $admin_id, NOW(), NOW())
-        ON DUPLICATE KEY UPDATE is_active=1, fix_summary='$summary', updated_at=NOW()
-    ");
-    remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id, 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs');
+    $summary = "Source code patch applied directly via ConnectHub Sentinel using Gemini.";
+    apply_ai_fix_rule_for_file($conn, $filePath, $admin_id, $summary);
 
     echo json_encode([
         'success' => true,

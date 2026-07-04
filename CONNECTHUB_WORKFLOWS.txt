@@ -1,1329 +1,527 @@
-CONNECTHUB - WORKFLOW HOAT DONG HE THONG
-========================================
+CONNECTHUB - NOI DUNG SLIDE WORKFLOW QUAN TRONG
+================================================
 
-Tai lieu nay mo ta workflow cua web ConnectHub tu tong the den tung chuc nang.
-Project la mot social media lab bang PHP + MySQL, co ca chuc nang nguoi dung,
-admin moderation, intrusion detection va ConnectHub Sentinel AI Agent.
-
-
-0. TONG QUAN KIEN TRUC
-----------------------
-
-Nguoi dung / Admin
-        |
-        v
-Trinh duyet Web
-        |
-        v
-Apache + PHP app/
-        |
-        +--> includes/db.php
-        |       - Ket noi MySQL
-        |       - Khoi tao session
-        |       - Nap security.php
-        |       - Goi IDS / AI Fix / ban check
-        |
-        +--> includes/security.php
-        |       - Tao/migrate schema admin/security
-        |       - Intrusion Detection
-        |       - AI Fix rule enforcement
-        |       - Agent memory
-        |       - Block IP / ban user / session check
-        |
-        +--> Pages chinh
-        |       - login.php, register.php, logout.php
-        |       - user.php, admin.php
-        |       - index.php, post.php, profile.php
-        |       - messages.php, friends.php, search.php
-        |       - settings.php, preview.php, oauth.php
-        |
-        +--> API
-                - api/ai_agent.php
-                - api/get_contacts.php
-                - api/get_messages.php
-                - api/send_message.php
-
-Database MySQL
-        |
-        +--> users
-        +--> posts
-        +--> comments
-        +--> messages
-        +--> friend_requests
-        +--> url_previews
-        +--> security_events
-        +--> ai_fix_rules
-        +--> ai_agent_memory
-        +--> ai_attack_memory
-        +--> ai_agent_config
-        +--> blocked_ips
+Muc tieu file:
+- Dung lam noi dung dua vao slide thuyet trinh.
+- Tap trung vao cac workflow quan trong cua web ConnectHub.
+- Khong di qua qua nhieu chi tiet code nho.
 
 
-1. REQUEST LIFECYCLE TONG THE
+SLIDE 1 - TONG QUAN HE THONG CONNECTHUB
+---------------------------------------
+
+ConnectHub la mot social media lab gom 3 phan chinh:
+
+1. User Space
+   - Dang ky, dang nhap
+   - Dang bai, binh luan
+   - Ket ban, nhan tin rieng
+   - Cap nhat profile va avatar
+
+2. Admin Space
+   - Duyet bai / xoa bai
+   - Quan ly user
+   - Ban / unban user
+   - Theo doi Intrusion Detection
+
+3. Security Lab + AI Agent
+   - Ghi nhan payload tan cong
+   - Hien thi log theo thoi gian/IP/user
+   - AI Fix / Learn Attack
+   - ConnectHub Sentinel ho tro phan tich va de xuat cach fix
+
+Workflow tong quan:
+
+User/Admin
+    -> Browser
+    -> PHP Application
+    -> MySQL Database
+    -> Security Logs / AI Agent
+
+
+SLIDE 2 - WORKFLOW REQUEST TONG THE
+-----------------------------------
+
+Moi request vao web deu di qua cac buoc:
+
+Browser Request
+    -> includes/db.php
+    -> Ket noi MySQL
+    -> Khoi tao session
+    -> includes/security.php
+    -> Kiem tra IP bi block
+    -> Quet payload nghi ngo
+    -> Kiem tra AI Fix rule
+    -> Kiem tra user bi ban
+    -> Chay logic cua page
+    -> Render HTML / Tra JSON
+
+Y nghia:
+- Web khong chi xu ly chuc nang social.
+- Moi request con duoc dua qua lop security monitoring.
+- IDS co the ghi nhan SQLi, XSS, SSRF, command injection va unknown attack.
+
+
+SLIDE 3 - WORKFLOW DANG NHAP VA PHAN QUYEN
+------------------------------------------
+
+Dang nhap:
+
+User nhap username/password
+    -> login.php nhan POST
+    -> Kiem tra payload nghi ngo
+    -> Query database users
+    -> Tao session
+    -> Tao session_token
+    -> Luu token vao database
+    -> Redirect theo role
+
+Phan quyen:
+
+Neu la Admin:
+    -> Chuyen den admin.php
+
+Neu la User:
+    -> Chuyen den user.php
+
+Neu chua login:
+    -> Redirect ve login.php
+
+Diem quan trong:
+- Admin va User co trang rieng.
+- Session token giup kiem tra phien dang nhap hien tai.
+- Login activity duoc log lai trong admin dashboard.
+
+
+SLIDE 4 - WORKFLOW USER SPACE
 -----------------------------
 
-Moi request vao PHP page/API thuong di qua flow:
+Sau khi user dang nhap:
 
-Browser request
-        |
-        v
-Page PHP require_once includes/db.php
-        |
-        v
-db.php ket noi MySQL + session_start()
-        |
-        v
-ensure_admin_schema(conn)
-        |
-        +--> Tao/cap nhat cac cot va bang can thiet:
-        |    users.gender, posts.status, security_events,
-        |    ai_fix_rules, blocked_ips, app_meta,
-        |    ai_agent_memory, ai_attack_memory, ai_agent_config
-        |
-        v
-enforce_ip_blocking(conn)
-        |
-        +--> Neu IP nam trong blocked_ips:
-        |       Chan request
-        |
-        v
-inspect_request_for_intrusion(conn)
-        |
-        +--> Quet query string, GET, POST, FILE name
-        +--> Neu thay payload nghi ngo:
-                Ghi security_events
-        |
-        v
-enforce_ai_fix_rules(conn)
-        |
-        +--> Neu route co rule active trong ai_fix_rules
-        +--> Neu payload match rule:
-                Chan request hoac cho code path da patch xu ly
-        |
-        v
-enforce_not_banned(conn)
-        |
-        +--> Neu user bi ban:
-                Logout/chan truy cap
-        |
-        v
-enforce_single_session(conn)
-        |
-        +--> Kiem tra session_token cua user
-        +--> Neu token khac DB:
-                Session cu bi logout
-        |
-        v
-Chay logic rieng cua page/API
-        |
-        v
-Render HTML / Tra JSON / Redirect
-
-
-2. DATABASE WORKFLOW
---------------------
-
-Bang chinh:
-
-users
-    - Luu tai khoan, role admin/user, avatar, gender, ban status, OAuth info.
-
-posts
-    - Luu bai viet, anh, private flag, status moderation.
-
-comments
-    - Luu comment theo post.
-
-messages
-    - Luu tin nhan rieng giua users.
-
-friend_requests
-    - Luu loi moi ket ban va trang thai accepted/pending/rejected.
-
-security_events
-    - Log login, payload tan cong, AI Fix, block/unblock, reset lab.
-
-ai_fix_rules
-    - Rule active de AI Fix bao ve route.
-    - Bi reset khi bam Reset Lab State de lab quay lai vulnerable state.
-
-ai_agent_memory
-    - Tri nho dai han cua ConnectHub Sentinel ve cach fix.
-    - Khong phai rule active.
-
-ai_attack_memory
-    - Tri nho fingerprint attack la.
-    - Lan dau: unknown_attack.
-    - Sau khi admin bam Learn Attack: ghi memory.
-    - Lan sau payload giong fingerprint: learned_attack.
-
-ai_agent_config
-    - Luu OpenAI API key va model cua ConnectHub Sentinel.
-
-blocked_ips
-    - IP bi admin block.
-
-
-3. AUTH WORKFLOW - DANG KY
---------------------------
-
-File: register.php
-
-User mo register.php
-        |
-        v
-Nhap username, email, password, full name, gender
-        |
-        v
-POST register form
-        |
-        v
-Kiem tra username/email da ton tai chua
-        |
-        +--> Neu ton tai:
-        |       Bao loi
-        |
-        +--> Neu hop le:
-                Hash password bang MD5
-                Chon avatar mac dinh theo gender
-                INSERT vao users
-                Redirect/login
-
-Ghi chu lab:
-    - Password dung MD5 de phuc vu lab weak security.
-    - Gender male/female gan avatar default-male.svg/default-female.svg.
-
-
-4. AUTH WORKFLOW - DANG NHAP
-----------------------------
-
-File: login.php
-
-User mo login.php
-        |
-        v
-Nhap username/password
-        |
-        v
-POST login form
-        |
-        v
-log_if_suspicious_payload()
-        |
-        +--> Neu input co dau hieu tan cong:
-        |       Ghi security_events
-        |
-        v
-Kiem tra AI Fix rule login SQLi
-        |
-        +--> Neu rule active:
-        |       Dung prepared statement
-        |
-        +--> Neu chua active:
-                Dung query vulnerable de lab co SQL Injection
-        |
-        v
-Neu login thanh cong
-        |
-        +--> Kiem tra user bi ban khong
-        +--> Tao session
-        +--> Tao session_token
-        +--> Luu session_token vao users
-        +--> Log admin_login/user_login
-        |
-        v
-Redirect theo role
-        |
-        +--> Admin -> admin.php
-        +--> User  -> user.php
-
-Neu login that bai:
-        |
-        v
-Log failed_login
-Hien loi
-
-
-5. AUTH WORKFLOW - LOGOUT
--------------------------
-
-File: logout.php
-
-User/Admin bam Logout
-        |
-        v
-session_destroy()
-        |
-        v
-Xoa CONNECTHUB_SESSION cookie
-Xoa remember_token cookie
-        |
-        v
-Redirect login.php
-
-
-6. ROLE ROUTING WORKFLOW
-------------------------
-
-includes/security.php:
-
-require_login()
-        |
-        +--> Neu chua login:
-                Redirect login.php
-
-require_admin()
-        |
-        +--> require_login()
-        +--> Neu khong phai admin:
-                Redirect user.php
-
-require_regular_user()
-        |
-        +--> require_login()
-        +--> Neu la admin:
-                Redirect admin.php
-
-Ket qua:
-    - Admin co trang rieng: admin.php.
-    - User co trang rieng: user.php.
-    - Role khong bi tron trang.
-
-
-7. USER DASHBOARD WORKFLOW
---------------------------
-
-File: user.php
-
-User login thanh cong
-        |
-        v
-require_regular_user()
-        |
-        v
-Lay thong tin user hien tai
-Lay so bai viet, pending/approved, friends
-        |
-        v
-Render dashboard:
-        - Welcome
-        - Total Posts
-        - Waiting Review
-        - Approved
+user.php
+    -> Hien dashboard ca nhan
+    -> Hien tong so bai viet
+    -> Hien bai dang cho duyet
+    -> Hien so ban be
+    -> Quick access den:
+        - Feed
+        - Messages
         - Friends
-        - Quick Access:
-            Messages
-            Friends
-            Search People
-            Settings
-        - Recent Posts
+        - Search
+        - Settings
+
+Workflow User chinh:
+
+User Dashboard
+    -> Feed: tao bai viet
+    -> Profile: xem thong tin ca nhan/nguoi khac
+    -> Friends: ket ban
+    -> Messages: nhan tin rieng
+    -> Settings: cap nhat profile/avatar
+
+Y nghia:
+- User Space la khu vuc thao tac cua nguoi dung binh thuong.
+- Cac hanh dong cua user co the tao ra noi dung can admin duyet.
 
 
-8. ADMIN DASHBOARD WORKFLOW
----------------------------
+SLIDE 5 - WORKFLOW DANG BAI VA DUYET BAI
+----------------------------------------
 
-File: admin.php
-
-Admin login thanh cong
-        |
-        v
-require_admin()
-        |
-        v
-Load stats:
-        - Pending posts
-        - Approved posts
-        - Users
-        - Banned users
-        - Open events
-        |
-        v
-Load panels:
-        - Posts moderation
-        - User management
-        - Intrusion Detection
-        - Login Activity
-        - Detected Vulnerability Attempts
-        - Blocked IPs
-        - Full Recent Event Log
-        - ConnectHub Sentinel widget
-
-Admin actions:
-        |
-        +--> approve_post
-        |       UPDATE posts SET status='approved'
-        |       log admin_approved_post
-        |
-        +--> reject_post
-        |       UPDATE posts SET status='rejected'
-        |       log admin_rejected_post
-        |
-        +--> delete_post
-        |       DELETE comments theo post
-        |       DELETE post
-        |       log admin_deleted_post
-        |
-        +--> ban_user
-        |       UPDATE users SET is_banned=1
-        |       log admin_banned_user
-        |
-        +--> unban_user
-        |       UPDATE users SET is_banned=0
-        |       log admin_unbanned_user
-        |
-        +--> block_ip
-        |       INSERT/UPDATE blocked_ips
-        |       log admin_blocked_ip
-        |
-        +--> unblock_ip
-        |       DELETE FROM blocked_ips
-        |       log admin_unblocked_ip
-        |
-        +--> resolve_event
-        |       Mark reviewed security event group
-        |
-        +--> delete_event
-        |       Soft delete security event group
-        |
-        +--> ai_fix_event
-        |       Tao ai_fix_rules active
-        |       Ghi ai_agent_memory
-        |       Mark event fixed
-        |
-        +--> train_ai_fix_all
-        |       Tao rule cho cac route trong README/lab
-        |       Ghi memory cho Sentinel
-        |
-        +--> reset_security_data
-                Reset lab database ve seed state
-                Xoa ai_fix_rules/security_events/blocked_ips/app_meta
-                Reset users/posts/comments/messages/friends
-                Xoa uploads phat sinh
-                Restore file .bak neu co
-
-
-9. RESET LAB STATE WORKFLOW
----------------------------
-
-Nut: Reset Lab State trong admin.php
-
-Admin bam reset
-        |
-        v
-Confirm tren browser
-        |
-        v
-admin_reset_lab_database(conn)
-        |
-        +--> SET FOREIGN_KEY_CHECKS=0
-        +--> DELETE + AUTO_INCREMENT reset:
-        |       ai_fix_rules
-        |       security_events
-        |       blocked_ips
-        |       app_meta
-        |       url_previews
-        |       friend_requests
-        |       messages
-        |       comments
-        |       posts
-        |       users
-        |
-        +--> SET FOREIGN_KEY_CHECKS=1
-        |
-        +--> Seed lai:
-                admin/admin123
-                alice/alice123
-                bob/bob123
-                charlie/charlie123
-                posts/comments/messages/friend_requests mac dinh
-        |
-        v
-admin_reset_uploaded_files()
-        |
-        +--> Xoa upload phat sinh
-        +--> Giu avatar/file default
-        |
-        v
-Tao lai session admin hien tai
-        |
-        v
-Restore .bak files neu AI hotpatch da tao backup
-        |
-        v
-Lab quay lai trang thai ban dau
-
-Ghi chu quan trong:
-    - Reset Lab State dung de reset lab vulnerable ban dau.
-    - ai_fix_rules bi xoa de cac loi co the test lai.
-    - ai_agent_memory va ai_attack_memory la memory agent rieng, khong nam trong danh sach reset.
-
-
-10. POST / FEED WORKFLOW
-------------------------
-
-File: index.php
+User dang bai:
 
 User vao Feed
-        |
-        v
-require_login()
-        |
-        v
-Neu submit post:
-        |
-        +--> Lay post_content, is_private, post_image
-        +--> Upload image neu co
-        +--> log_if_suspicious_payload(content)
-        +--> Neu AI XSS/private rule active:
-        |       Dung prepared statement / safe path
-        |
-        +--> Neu chua active:
-                INSERT vulnerable vao posts
-        |
-        v
-Post status='pending'
-        |
-        v
-Admin can approve/reject
+    -> Nhap noi dung bai viet
+    -> Chon public/private
+    -> Upload anh neu co
+    -> Submit
+    -> Luu vao bang posts voi status = pending
+    -> Cho admin duyet
 
-Render feed:
-        |
-        +--> Neu private disclosure fixed:
-        |       Chi hien post public hoac cua chinh user
-        |
-        +--> Neu chua fixed:
-                Hien ca private posts de phuc vu lab
-        |
-        v
-Hien content:
-        |
-        +--> Neu XSS fixed:
-        |       ai_safe_html(content)
-        |
-        +--> Neu chua fixed:
-                Render raw HTML de lab Stored XSS
+Admin moderation:
+
+Admin vao admin.php
+    -> Xem danh sach Pending Posts
+    -> Approve / Reject / Delete
+    -> Cap nhat status bai viet
+    -> Ghi log hanh dong admin
+
+Workflow:
+
+User Post
+    -> Database posts
+    -> Pending queue
+    -> Admin review
+    -> Approved/Rejected/Deleted
+
+Y nghia:
+- Admin co vai tro kiem duyet noi dung.
+- Bai viet khong tu dong public ngay neu dang o trang thai pending.
 
 
-11. POST DETAIL / COMMENT WORKFLOW
-----------------------------------
+SLIDE 6 - WORKFLOW PROFILE, FRIENDS VA MESSAGES
+-----------------------------------------------
 
-File: post.php
+Profile:
 
-User mo post.php?id=<id>
-        |
-        v
-Lay post theo id
-        |
-        v
-Neu submit comment:
-        |
-        +--> Lay comment content
-        +--> log_if_suspicious_payload(content)
-        +--> INSERT comments
-        |
-        v
-Render post + comments
-        |
-        +--> Neu XSS rule active:
-        |       Escape output
-        |
-        +--> Neu chua active:
-                Render raw content de lab Stored XSS
+User mo profile.php?id=<user_id>
+    -> Lay thong tin user
+    -> Lay bai viet cua user do
+    -> Hien nut Add Friend / Message
 
+Friend request:
 
-12. PROFILE WORKFLOW
---------------------
+User bam Add Friend
+    -> Tao friend_requests
+    -> Nguoi nhan vao friends.php
+    -> Accept hoac Reject
+    -> Neu accepted thi tro thanh ban be
 
-File: profile.php
+Private message:
 
-User mo profile.php?id=<id>
-        |
-        v
-Lay user theo id
-        |
-        v
-Kiem tra friend_requests giua current user va profile user
-        |
-        v
-Neu bam Add Friend:
-        |
-        +--> INSERT friend_requests(sender_id, receiver_id)
-        |
-        v
-Lay posts cua profile user
-        |
-        +--> Neu private disclosure fixed:
-        |       Loc private posts theo quyen
-        |
-        +--> Neu chua fixed:
-                Hien tat ca posts, ke ca private
-        |
-        v
-Render profile:
-        - avatar
-        - full name / username / bio
-        - OAuth scope neu co
-        - Add Friend / Message
-        - Posts
+User chon Chat
+    -> messages.php?to=<id>
+    -> Gui noi dung tin nhan
+    -> Luu vao messages
+    -> Poll tin nhan moi bang JavaScript/API
+
+Workflow:
+
+Profile
+    -> Add Friend
+    -> Friend accepted
+    -> Message
+    -> Realtime polling
+
+Y nghia:
+- Day la nhom chuc nang social chinh cua ConnectHub.
+- Messenger co ca trang full messages va floating chat popup.
 
 
-13. SETTINGS / AVATAR WORKFLOW
+SLIDE 7 - WORKFLOW ADMIN SPACE
 ------------------------------
 
-File: settings.php
+Admin Dashboard gom:
 
-User vao settings
-        |
-        v
-Load user hien tai
-        |
-        v
-Neu update profile:
-        |
-        +--> Lay full_name, bio
-        +--> Neu AI XSS fixed:
-        |       UPDATE bang prepared statement
-        |
-        +--> Neu chua fixed:
-                UPDATE vulnerable
-        |
-        v
-Neu upload avatar:
-        |
-        +--> Lay file upload
-        +--> Neu AI upload/command fixed:
-        |       Validate MIME/extension
-        |       Rename file random
-        |       UPDATE avatar bang prepared statement
-        |
-        +--> Neu chua fixed:
-                Dung filename goc
-                Co command injection qua metadata processing
-                Co avatar upload bypass
-        |
-        v
-Render settings + preview avatar
+1. Moderation
+   - Duyet bai
+   - Tu choi bai
+   - Xoa bai vi pham
 
+2. User Management
+   - Xem danh sach user
+   - Ban user
+   - Unban user
 
-14. SEARCH WORKFLOW
--------------------
+3. Security Monitoring
+   - Xem login activity
+   - Xem vulnerability attempts
+   - Xem IP cua attacker
+   - Xem payload
 
-File: search.php
+4. Response Action
+   - Mark reviewed
+   - Delete old event
+   - Block IP
+   - AI Fix
+   - Learn Attack
+   - Reset Lab State
 
-User vao search.php?q=<keyword>
-        |
-        v
-Lay q tu GET
-        |
-        v
-Neu AI SQLi fixed:
-        |
-        +--> Prepared statement LIKE
-        |
-        v
-Neu chua fixed:
-        |
-        +--> Noi chuoi SQL:
-            SELECT ... WHERE username LIKE '%q%'
-        |
-        v
-Render ket qua
-        |
-        +--> Neu AI XSS fixed:
-        |       Escape q/output
-        |
-        +--> Neu chua fixed:
-                Reflected XSS co the chay
+Workflow:
+
+Security/Event/Data
+    -> Admin Dashboard
+    -> Admin Review
+    -> Action
+    -> Log lai ket qua
+
+Y nghia:
+- Admin la trung tam dieu hanh va phong thu cua web.
+- Tat ca hanh dong quan trong deu duoc ghi log.
 
 
-15. FRIEND REQUEST WORKFLOW
----------------------------
+SLIDE 8 - WORKFLOW INTRUSION DETECTION
+--------------------------------------
 
-Files: profile.php, friends.php
+Moi request vao web:
 
-Gui loi moi:
-        |
-        v
-profile.php?id=<target_user>
-        |
-        v
-POST send_friend_request
-        |
-        v
-INSERT friend_requests(sender_id=current_user, receiver_id=target_user)
+Request
+    -> Collect URI, GET, POST, FILE name
+    -> Quet regex payload
+    -> Neu co dau hieu tan cong
+    -> Ghi vao security_events
+    -> Hien trong Admin Intrusion Detection
 
-Nhan loi moi:
-        |
-        v
-friends.php
-        |
-        v
-Load pending requests where receiver_id=current_user
-        |
-        +--> Accept:
-        |       UPDATE friend_requests SET status='accepted'
-        |
-        +--> Reject:
-                UPDATE friend_requests SET status='rejected'
+Loai su kien co the phat hien:
 
-Danh sach ban be:
-        |
-        v
-SELECT accepted requests where current user la sender hoac receiver
-        |
-        v
-Hien friend card + nut Chat
+- SQL Injection
+- XSS / Stored Script
+- Path Traversal
+- Command Injection
+- SSRF
+- OAuth Scope Escalation
+- Unknown Attack
+- AI Learned Attack
 
+Thong tin log:
 
-16. PRIVATE MESSAGING WORKFLOW
-------------------------------
+- Thoi gian
+- User / Guest
+- IP address
+- Event type
+- Severity
+- URL / Route
+- Payload
+- Details
 
-Files:
-    - messages.php
-    - fetch_messages.php
-    - api/get_contacts.php
-    - api/get_messages.php
-    - api/send_message.php
-    - js/messenger.js
-
-Full messages page:
-
-User mo messages.php
-        |
-        v
-Load inbox conversations
-        |
-        v
-Neu co ?to=<id>:
-        |
-        +--> Load conversation voi user id do
-        +--> Mark messages read
-        +--> Render chat window
-        |
-        v
-Neu gui message:
-        |
-        +--> POST content
-        +--> log_if_suspicious_payload(content)
-        +--> INSERT messages(sender_id, receiver_id, content)
-        |
-        v
-JavaScript polling:
-        |
-        +--> fetch_messages.php?to=<id>
-        +--> Update chatBox
-
-Messenger popup:
-
-Page load includes messenger_popup.php
-        |
-        v
-js/messenger.js
-        |
-        +--> Load contacts tu api/get_contacts.php
-        +--> Open floating chat window
-        +--> Poll api/get_messages.php?to=<id>&last_id=<last>
-        +--> Send message qua api/send_message.php
-
-Ghi chu lab:
-    - IDOR co chu dich neu AI Fix chua active.
-    - Stored XSS trong message neu output render raw HTML.
+Y nghia:
+- IDS giup admin thay ai dang tan cong, tan cong luc nao, payload la gi.
+- Day la phan quan trong de viet bao cao kiem thu bao mat.
 
 
-17. OAUTH WORKFLOW
-------------------
+SLIDE 9 - WORKFLOW AI FIX
+-------------------------
 
-File: oauth.php
+Khi IDS phat hien loi:
 
-User chon GitHub/Google tren login.php
-        |
-        v
-oauth.php?provider=<provider>&scope=<scope>
-        |
-        v
-Mo phong OAuth provider
-        |
-        v
-Server tao oauth_user fake
-        |
-        v
-Neu user OAuth da ton tai:
-        |
-        +--> UPDATE oauth_scope
-        |
-        v
-Neu chua ton tai:
-        |
-        +--> INSERT users voi oauth_provider/oauth_id/oauth_scope
-        |
-        v
-Neu scope elevated:
-        |
-        +--> log oauth_scope_escalation
-        |
-        v
-Tao session + session_token
-        |
-        v
-Redirect theo role
+Security Event
+    -> Admin thay trong Intrusion Detection
+    -> Admin bam AI Fix
+    -> Tao rule trong ai_fix_rules
+    -> Event chuyen sang FIXED
+    -> Ghi memory vao ai_agent_memory
 
-Ghi chu lab:
-    - Neu AI Fix chua active, server tin scope tu client.
-    - Neu AI Fix active, scope duoc allowlist.
+Khi attacker thu lai:
+
+Request moi
+    -> Kiem tra ai_fix_rules
+    -> Neu payload match rule
+    -> Chan request hoac dua qua code path an toan
+    -> Ghi log AI Fix blocked/handled
+
+Workflow:
+
+Attack Detected
+    -> AI Fix
+    -> Rule Active
+    -> Future Attack Blocked
+
+Y nghia:
+- AI Fix la co che bao ve tam thoi/huong dan fix.
+- Lab van co the reset lai de test lai cac lo hong.
 
 
-18. URL PREVIEW / SSRF WORKFLOW
--------------------------------
+SLIDE 10 - WORKFLOW CONNECTHUB SENTINEL
+---------------------------------------
 
-File: preview.php
+ConnectHub Sentinel la AI Agent trong Admin Dashboard.
 
-User nhap URL preview
-        |
-        v
-POST/GET URL
-        |
-        v
-Neu AI SSRF fixed:
-        |
-        +--> Chi cho phep http/https hop le
-        +--> Chan localhost/private/internal/file scheme
-        |
-        v
-Neu chua fixed:
-        |
-        +--> Server fetch URL nguoi dung nhap
-        +--> Co the fetch local/internal resource trong lab
-        |
-        v
-Luu/tra url preview
+Chuc nang:
 
+- Admin hoi cach fix loi
+- Agent doc security_events gan day
+- Agent doc ai_agent_memory
+- Agent scan code hotspots
+- Agent goi Gemini API
+- Agent tra loi cach fix
+- Agent co the de xuat patch source code
 
-19. INTRUSION DETECTION WORKFLOW
---------------------------------
+Workflow chat:
 
-includes/security.php
+Admin question
+    -> api/ai_agent.php
+    -> Load recent logs
+    -> Load agent memory
+    -> Load code hotspots
+    -> Call Gemini model
+    -> Return answer
+    -> Render chat bubble
 
-Moi request
-        |
-        v
-collect_request_payload_parts()
-        |
-        +--> uri
-        +--> query
-        +--> GET params
-        +--> POST params tru password
-        +--> FILE names
-        |
-        v
-inspect_request_for_intrusion()
-        |
-        +--> Match known regex:
-        |       sql_injection
-        |       xss_probe
-        |       path_traversal
-        |       command_injection
-        |       ssrf_probe
-        |
-        +--> Neu match:
-        |       log_security_event()
-        |
-        +--> Neu khong match nhung payload co signal la:
-        |       log unknown_attack
-        |
-        +--> Neu fingerprint da hoc trong ai_attack_memory:
-                log learned_attack
+Workflow patch:
 
-security_events fields:
-        - user_id
-        - actor_username
-        - ip_address
-        - user_agent
-        - event_type
-        - severity
-        - request_uri
-        - payload
-        - details
-        - occurred_at
-        - resolved/fixed/deleted fields
+AI response co patch block
+    -> UI hien Apply Source Patch
+    -> Admin bam apply
+    -> Tao file .bak
+    -> Ghi code moi vao source file
+    -> Log ai_hotpatch_applied
+    -> Luu AI memory
 
-Admin xem tai:
-        admin.php#security
+Y nghia:
+- Sentinel khong chi tra loi text.
+- No co the chi vi tri code nghi ngo va de xuat cach sua.
 
 
-20. AI FIX RULE WORKFLOW
-------------------------
+SLIDE 11 - WORKFLOW LEARN UNKNOWN ATTACK
+----------------------------------------
 
-Bang: ai_fix_rules
-File: includes/security.php
+Lan dau gap tan cong la:
 
-Admin bam AI Fix tren event
-        |
-        v
-admin.php action ai_fix_event
-        |
-        v
-Lay event_type + request_uri
-        |
-        v
-admin_ai_fix_summary(event_type)
-        |
-        v
-admin_upsert_ai_fix_rule()
-        |
-        +--> INSERT/UPDATE ai_fix_rules
-        |
-        v
-admin_remember_ai_fix()
-        |
-        +--> Luu vao ai_agent_memory
-        |
-        v
-Mark security_events fixed/resolved
+Unknown payload
+    -> IDS khong match pattern cu
+    -> Neu payload co dau hieu bat thuong
+    -> Log unknown_attack
+    -> Admin thay event moi
 
-Khi request tiep theo vao route da co rule:
-        |
-        v
-enforce_ai_fix_rules()
-        |
-        +--> Lay active rules cua route
-        +--> Match payload theo event_type
-        |
-        +--> Neu code patch da co:
-        |       Log ai_fix_code_patch_*
-        |       Cho request di tiep de code secure xu ly
-        |
-        +--> Neu chua code patch:
-                Log ai_fix_blocked_*
-                Return 403 "AI Fix blocked this request"
+Admin cho agent hoc:
 
-
-21. CONNECTHUB SENTINEL AI AGENT WORKFLOW
------------------------------------------
-
-Files:
-    - admin.php
-    - api/ai_agent.php
-    - includes/security.php
-
-UI:
-    Floating chat widget trong admin.php
-    Ten: ConnectHub Sentinel
-
-Config:
-    ai_agent_config
-        - openai_api_key
-        - openai_model
-
-Model:
-    - gpt-5.4-mini default
-    - gpt-5.4
-    - gpt-5.5
-    - gpt-5.4-nano
-    - gpt-4.1-mini
-    - gpt-4o-mini
-    - custom model id
-
-Chat workflow:
-
-Admin mo chat widget
-        |
-        v
-Nhap OpenAI API key / chon model
-        |
-        v
-save_key/save_model -> api/ai_agent.php
-        |
-        v
-Luu vao ai_agent_config
-
-Admin chat hoi cach fix
-        |
-        v
-admin.php JS fetch api/ai_agent.php action=chat
-        |
-        v
-api/ai_agent.php load:
-        - recent security_events
-        - ai_agent_memory
-        - code hotspots
-        - lab guide map
-        |
-        v
-Goi OpenAI Responses API
-        |
-        v
-Nhan reply
-        |
-        v
-Render chat bubble
-
-Neu AI tra ve patch block:
-        |
-        v
-Frontend parse:
-        ```patch
-        [PATCH] file_path: ...
-        [SEARCH]
-        ...
-        [REPLACE]
-        ...
-        ```
-        |
-        v
-Hien card Apply Source Patch
-        |
-        v
-Admin bam Apply Source Patch
-        |
-        v
-api/ai_agent.php action=apply_patch
-        |
-        +--> Validate target path trong app/
-        +--> Doc file
-        +--> Tim SEARCH block
-        +--> Tao backup .bak
-        +--> Ghi REPLACE vao source file
-        +--> Log ai_hotpatch_applied
-        +--> Tao ai_fix_rules
-        +--> Luu ai_agent_memory
-
-
-22. UNKNOWN ATTACK LEARNING WORKFLOW
-------------------------------------
-
-Muc tieu:
-    Lan dau he thong chua biet attack -> log unknown_attack.
-    Admin bam Learn Attack -> Sentinel hoc pattern.
-    Lan sau gap lai fingerprint -> log learned_attack.
-
-Flow:
-
-Request co payload la
-        |
-        v
-inspect_request_for_intrusion()
-        |
-        +--> Neu khong match SQLi/XSS/SSRF/Command/Traversal
-        +--> Nhung co signal bat thuong:
-                Log unknown_attack
-        |
-        v
-Admin thay Unknown Attack trong Intrusion Detection
-        |
-        v
 Admin bam Learn Attack
-        |
-        v
-admin.php JS call api/ai_agent.php action=learn_unknown
-        |
-        v
-api/ai_agent.php:
-        - Lay event
-        - Tinh fingerprint payload
-        - Xac dinh route
-        - inspect_source_hotspots(route)
-        - Goi OpenAI de phan loai neu co API key
-        - Neu OpenAI loi/chua co key: dung heuristic fallback
-        |
-        v
-remember_ai_attack_signature()
-        |
-        +--> INSERT/UPDATE ai_attack_memory:
-                fingerprint
-                route
-                attack_name
-                signature_hint
-                reference_url
-                code_location
-                fix_guidance
-                seen_count
-        |
-        v
-Tra ve chat:
-        - Ten attack
-        - Route
-        - File code nghi ngo
-        - Code hotspots
-        - Reference
-        - Huong fix
-        |
-        v
-Lan sau request cung fingerprint + route:
-        |
-        v
-ai_known_attack_from_memory()
-        |
-        v
-Log learned_attack
+    -> Sentinel lay payload + route
+    -> Tinh fingerprint
+    -> Scan code hotspot
+    -> Goi Gemini de phan loai neu co API key
+    -> Neu API loi thi dung heuristic fallback
+    -> Luu vao ai_attack_memory
+
+Lan sau gap lai:
+
+Request co fingerprint giong
+    -> IDS tim trong ai_attack_memory
+    -> Log learned_attack
+    -> Tang seen_count
+
+Workflow:
+
+Unknown Attack
+    -> Learn Attack
+    -> Save Attack Memory
+    -> Next Time Recognized
+
+Y nghia:
+- Agent co kha nang hoc pattern moi.
+- Lan dau chua biet, lan sau co the nhan dien lai.
 
 
-23. CODE HOTSPOT SCAN WORKFLOW
-------------------------------
+SLIDE 12 - WORKFLOW RESET LAB STATE
+-----------------------------------
 
-File: api/ai_agent.php
-
-inspect_source_hotspots(route)
-        |
-        v
-route_to_source_file(route)
-        |
-        v
-Doc source file
-        |
-        v
-Tim cac dong co dau hieu sink/risky API:
-        - $_GET
-        - $_POST
-        - $_REQUEST
-        - $_FILES
-        - ->query(
-        - mysqli_query
-        - echo
-        - innerHTML
-        - file_get_contents
-        - curl_exec
-        - shell_exec / exec / system / passthru
-        - move_uploaded_file
-        - include / require
-        |
-        v
-Tra ve list:
-        line X: code...
-
-Dung trong:
-        - Chat prompt cua Sentinel
-        - Learn Attack response
-        - Admin xem file nghi ngo can fix
-
-
-24. IP BLOCKING WORKFLOW
-------------------------
-
-Admin bam Block IP tren event
-        |
-        v
-admin.php action=block_ip
-        |
-        v
-Kiem tra IP khong phai IP hien tai cua admin
-        |
-        v
-INSERT/UPDATE blocked_ips
-        |
-        v
-Log admin_blocked_ip
-
-Moi request sau do:
-        |
-        v
-enforce_ip_blocking(conn)
-        |
-        +--> Lay current client IP
-        +--> Neu co trong blocked_ips:
-                Chan truy cap
-
-Unblock:
-        |
-        v
-admin.php action=unblock_ip
-        |
-        v
-DELETE blocked_ips WHERE ip_address=...
-        |
-        v
-Log admin_unblocked_ip
-
-
-25. BAN USER WORKFLOW
----------------------
-
-Admin bam Ban User
-        |
-        v
-admin.php action=ban_user
-        |
-        v
-Neu target khong phai admin hien tai
-        |
-        v
-UPDATE users SET is_banned=1, ban_reason, banned_at
-        |
-        v
-Log admin_banned_user
-
-Moi request cua user bi ban:
-        |
-        v
-enforce_not_banned(conn)
-        |
-        v
-Logout/chan truy cap
-
-Unban:
-        |
-        v
-UPDATE users SET is_banned=0, ban_reason=NULL, banned_at=NULL
-        |
-        v
-Log admin_unbanned_user
-
-
-26. FILE UPLOAD WORKFLOW
-------------------------
-
-Post image:
-        index.php
-        |
-        +--> Upload post_image vao uploads/
-        +--> Luu filename vao posts.image
-
-Avatar:
-        settings.php
-        |
-        +--> Upload avatar vao uploads/
-        +--> Luu filename vao users.avatar
-
-Reset upload:
-        admin_reset_uploaded_files()
-        |
-        +--> Xoa file phat sinh
-        +--> Giu default:
-                default-female.svg
-                default-male.svg
-                default.php
-                default.png
-                images.jpg
-                b79144e03dc4996ce319ff59118caf65.jpg
-                aNITSCAMRENGIEN.png
-                anh-dai-dien-facebook-nam-6.webp
-
-
-27. FRONTEND WORKFLOW
----------------------
-
-includes/header.php
-        |
-        +--> Nav theo role
-        +--> Link:
-                My Space / Feed / Search / Messages / Friends / Profile / Settings / Logout
-
-includes/footer.php
-        |
-        +--> Dong HTML, load common JS
-
-css/style.css
-        |
-        +--> Layout cards, posts, profile, messages, admin, AI widget
-
-js/main.js
-        |
-        +--> Common UI behavior
-
-js/messenger.js
-        |
-        +--> Floating messenger popup
-        +--> Load contacts
-        +--> Open chat windows
-        +--> Poll messages
-        +--> Send messages
-
-admin.php inline JS
-        |
-        +--> ConnectHub Sentinel chat widget
-        +--> Save OpenAI key/model
-        +--> Send chat
-        +--> Parse patch block
-        +--> Apply source patch
-        +--> Learn unknown attack
-
-
-28. SECURITY LAB STATE WORKFLOW
--------------------------------
-
-Trang thai ban dau:
-        |
-        +--> Co users seed
-        +--> Co posts/messages/friends seed
-        +--> Co cac lo hong lab
-        +--> Chua co AI active rules
-
-Khi bi tan cong:
-        |
-        +--> IDS log security_events
-
-Khi admin bam AI Fix:
-        |
-        +--> Tao ai_fix_rules active
-        +--> Route co the bi chan exploit
-        +--> Event doi sang fixed
-        +--> Sentinel ghi ai_agent_memory
-
-Khi admin bam Apply Source Patch:
-        |
-        +--> Source code duoc sua that
-        +--> Tao .bak backup
-        +--> Reset Lab State co the restore .bak
+Muc dich:
+- Dua lab ve trang thai ban dau de test lai lo hong.
 
 Khi admin bam Reset Lab State:
-        |
-        +--> Xoa rule active/log/blocked/data seed
-        +--> Restore vulnerable source tu .bak
-        +--> Lab quay lai trang thai test duoc loi
-        +--> Agent memory rieng van giu neu bang memory khong bi reset
+
+Confirm reset
+    -> Xoa AI fix rules active
+    -> Xoa security logs
+    -> Xoa blocked IPs
+    -> Reset users/posts/comments/messages/friends
+    -> Seed lai du lieu ban dau
+    -> Xoa upload phat sinh
+    -> Restore source tu file .bak neu co
+    -> Tao lai session admin
+
+Ket qua:
+
+Lab State
+    -> Quay lai ban dau
+    -> Co the khai thac/test lai loi
+
+Ghi chu:
+- Reset Lab State khong phai nut xoa project.
+- No phuc vu viec demo lai quy trinh tan cong -> phat hien -> fix.
 
 
-29. DEPLOYMENT WORKFLOW
------------------------
+SLIDE 13 - WORKFLOW CAC LO HONG TRONG LAB
+-----------------------------------------
 
-Local:
-        |
-        v
-docker compose up -d --build
-        |
-        v
-http://localhost
+ConnectHub co cac lo hong duoc cai san de demo:
+
+1. SQL Injection
+   - login.php
+   - search.php
+
+2. XSS
+   - search.php
+   - index.php
+   - post.php
+   - messages.php
+
+3. IDOR / Private Disclosure
+   - profile.php
+   - messages.php
+   - api/get_messages.php
+
+4. Weak Session
+   - includes/db.php
+   - login.php
+
+5. Command Injection / Upload Bypass
+   - settings.php
+
+6. SSRF
+   - preview.php
+
+7. OAuth Scope Escalation
+   - oauth.php
+
+Workflow demo loi:
+
+Attacker payload
+    -> Vulnerable route
+    -> IDS log event
+    -> Admin review
+    -> AI Fix / Report
+
+
+SLIDE 14 - WORKFLOW DEPLOYMENT
+------------------------------
+
+Local development:
+
+Code project
+    -> docker compose up -d --build
+    -> http://localhost
 
 GitHub:
-        |
-        v
-git add ...
-git commit -m "..."
-git push origin main
+
+Code changes
+    -> git add
+    -> git commit
+    -> git push origin main
 
 Railway:
-        |
-        v
-Railway theo GitHub repo
-        |
-        v
-Push len GitHub
-        |
-        v
-Railway redeploy service
-        |
-        v
-Domain:
-        https://fptusocialmedia.online
+
+GitHub main branch
+    -> Railway auto deploy
+    -> Public domain
+    -> fptusocialmedia.online
+
+Workflow:
+
+Local Code
+    -> GitHub
+    -> Railway
+    -> Public Web
+
+Y nghia:
+- GitHub la noi luu source.
+- Railway doc source tu GitHub de deploy web.
 
 
-30. WORKFLOW TOM TAT MOT DONG
------------------------------
+SLIDE 15 - TOM TAT CAC WORKFLOW CHINH
+-------------------------------------
 
-User:
-    Register/Login -> User Dashboard -> Feed/Profile/Friends/Messages/Search/Settings -> Logout
+1. User workflow:
+   Register/Login -> User Space -> Feed/Profile/Friends/Messages/Settings
 
-Admin:
-    Login -> Admin Dashboard -> Moderate posts/users -> Watch IDS -> AI Fix/Learn Attack -> Reset lab khi can
+2. Admin workflow:
+   Login -> Admin Dashboard -> Moderate Content -> Manage Users -> Monitor Security
 
-IDS:
-    Every request -> Collect payload -> Detect known/unknown -> Log security_events -> Admin reviews
+3. Security workflow:
+   Request -> IDS scan -> security_events -> Admin review
 
-AI Fix:
-    Admin clicks AI Fix -> ai_fix_rules active -> future matching exploit blocked or handled safely
+4. AI workflow:
+   Event -> AI Fix / Learn Attack -> Memory -> Future detection
 
-ConnectHub Sentinel:
-    Admin config OpenAI key/model -> Chat with agent -> Agent reads logs/memory/code hotspots -> Suggest fix/patch -> Learn unknown attacks
+5. Reset workflow:
+   Reset Lab State -> Seed data -> Restore vulnerable lab -> Demo lai duoc
 
-Reset Lab:
-    Admin confirms reset -> database seed restored -> active rules/logs cleared -> upload/source backups restored -> lab ready for testing again
+Thong diep chinh:
+
+ConnectHub khong chi la social web.
+No la mot lab bao mat co day du:
+- Chuc nang nguoi dung
+- Chuc nang admin
+- Lo hong de khai thac
+- IDS de quan sat
+- AI Agent de hoc va de xuat fix
 

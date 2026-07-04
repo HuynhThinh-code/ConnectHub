@@ -264,6 +264,28 @@ function admin_reset_uploaded_files() {
     }
 }
 
+function admin_restore_source_backups() {
+    $basePath = realpath(__DIR__);
+    if (!$basePath) return 0;
+
+    $restored = 0;
+    $files = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($basePath, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::LEAVES_ONLY
+    );
+
+    foreach ($files as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'bak') continue;
+        $originalFile = substr($file->getPathname(), 0, -4);
+        if (file_exists($originalFile) && copy($file->getPathname(), $originalFile)) {
+            $restored++;
+        }
+        @unlink($file->getPathname());
+    }
+
+    return $restored;
+}
+
 function admin_group_attack_events($result) {
     $groups = [];
     if (!$result) return $groups;
@@ -342,11 +364,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ");
             admin_upsert_ai_fix_rule($conn, $event['event_type'], $route, admin_ai_fix_summary($event['event_type']), $admin_id);
             admin_remember_ai_fix($conn, $event['event_type'], $route, admin_ai_fix_summary($event['event_type']), $admin_id);
-            $message = 'AI Fix applied. Duplicate events changed to fixed.';
+            $message = 'Quick Protect activated. Duplicate events changed to protected.';
         }
     } elseif ($action === 'train_ai_fix_all') {
         $trained_count = admin_train_ai_fix_from_events($conn, $admin_id);
-        $message = "AI Fix trained $trained_count route rule(s). All trained exploit groups are now protected.";
+        $message = "Quick Protect trained $trained_count route rule(s). All trained exploit groups are now protected.";
     } elseif ($action === 'delete_event' && $id > 0) {
         $event_res = $conn->query("SELECT event_type, request_uri, payload FROM security_events WHERE id=$id AND deleted_at IS NULL LIMIT 1");
         if ($event_res && $event_res->num_rows > 0) {
@@ -391,6 +413,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         try {
             admin_reset_lab_database($conn);
             admin_reset_uploaded_files();
+            $restored_sources = admin_restore_source_backups();
 
             $token = md5('admin' . time());
             $_SESSION['user_id'] = 1;
@@ -400,28 +423,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $safe_token = $conn->real_escape_string($token);
             $conn->query("UPDATE users SET session_token='$safe_token' WHERE id=1");
             setcookie('remember_token', '', time()-3600, '/');
-            $message = 'Lab database reset complete. Default users, posts, comments, messages, friend requests, security logs, AI rules, blocked IPs, and generated uploads are back to the initial seed state.';
+            $message = 'Lab reset complete. Default users, posts, comments, messages, friend requests, security logs, Quick Protect rules, blocked IPs, generated uploads, and AI patched source files are back to the initial seed state. Restored source backups: ' . $restored_sources . '.';
         } catch (Exception $e) {
             $conn->query("SET FOREIGN_KEY_CHECKS=1");
             $error = 'Lab reset failed: ' . $e->getMessage();
-        }
-        
-        // Scan for .bak files and restore the original code files
-        $basePath = realpath(__DIR__);
-        if ($basePath) {
-            $files = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($basePath),
-                RecursiveIteratorIterator::LEAVES_ONLY
-            );
-            foreach ($files as $file) {
-                if ($file->isFile() && $file->getExtension() === 'bak') {
-                    $originalFile = substr($file->getPathname(), 0, -4);
-                    if (file_exists($originalFile)) {
-                        copy($file->getPathname(), $originalFile);
-                    }
-                    unlink($file->getPathname());
-                }
-            }
         }
         
     }
@@ -673,9 +678,9 @@ $ai_fix_rules = $conn->query("
         <div class="security-dashboard-grid">
             <section class="security-panel security-panel-wide" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h3 style="margin: 0;"><i class="fas fa-robot"></i> AI Fix Assistant</h3>
+                    <h3 style="margin: 0;"><i class="fas fa-robot"></i> Quick Protect Assistant</h3>
                     <form method="POST" style="margin: 0;">
-                        <button name="action" value="train_ai_fix_all" class="btn btn-success btn-sm"><i class="fas fa-brain"></i> Train AI Fix All</button>
+                        <button name="action" value="train_ai_fix_all" class="btn btn-success btn-sm"><i class="fas fa-brain"></i> Train Quick Protect</button>
                     </form>
                 </div>
             </section>
@@ -1184,7 +1189,7 @@ $ai_fix_rules = $conn->query("
                         .then(data => {
                             if (data.success) {
                                 btn.style.background = '#10b981';
-                                btn.innerHTML = '<i class="fas fa-check-double"></i> Patched Successfully!';
+                                btn.innerHTML = data.fallback_rule ? '<i class="fas fa-shield-halved"></i> Quick Protect Activated' : '<i class="fas fa-check-double"></i> Patched Successfully!';
                                 appendMessage('bot', '✔️ ' + data.message);
                                 activePatch = null;
                             } else {
@@ -1247,7 +1252,7 @@ $ai_fix_rules = $conn->query("
                         if (e.key === 'Enter') handleChatSend();
                     });
 
-                    // Modify the default "AI Fix" click buttons on the events panel
+                    // Modify the default "Quick Protect" click buttons on the events panel
                     window.triggerAiFixForEvent = function(eventType, route, details, payload) {
                         widget.classList.add('active');
                         appendMessage('user', `Hỏi cách vá lỗ hổng loại "${eventType}" tại route "${route}"`);
@@ -1377,9 +1382,9 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
 
                             <?php if ($event['ai_fixed_at']): ?>
                                 <div class="ai-fix-summary-box">
-                                    <div class="ai-fix-title"><i class="fas fa-wand-magic-sparkles"></i> AI Auto-Patch Applied</div>
+                                    <div class="ai-fix-title"><i class="fas fa-shield-halved"></i> Quick Protect Active</div>
                                     <p class="ai-fix-text"><?= htmlspecialchars($event['ai_fix_summary']) ?></p>
-                                    <small class="ai-fix-source">Protection rule active &middot; Guided by <a href="<?= htmlspecialchars(ai_security_source_url()) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(ai_security_source_name()) ?></a></small>
+                                    <small class="ai-fix-source">Rule protection active &middot; Guided by <a href="<?= htmlspecialchars(ai_security_source_url()) ?>" target="_blank" rel="noopener"><?= htmlspecialchars(ai_security_source_name()) ?></a></small>
                                 </div>
                             <?php endif; ?>
 
@@ -1387,7 +1392,7 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
                                 <div class="security-event-actions">
                                     <?php if (!$event['ai_fixed_at']): ?>
                                         <button type="button" class="btn btn-success btn-sm btn-glow" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
-                                            <i class="fas fa-wand-magic-sparkles"></i> AI Fix
+                                            <i class="fas fa-shield-halved"></i> Quick Protect
                                         </button>
                                         <?php if ($event['event_type'] === 'unknown_attack'): ?>
                                             <button type="button" class="btn btn-secondary btn-sm" onclick="triggerAiLearnUnknown('<?= htmlspecialchars((int)$event['id']) ?>')">
