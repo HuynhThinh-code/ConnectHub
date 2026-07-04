@@ -1,6 +1,7 @@
 <?php
 require_once 'includes/db.php';
 $error = '';
+$session_notice = '';
 
 if (isset($_GET['banned'])) {
     $error = 'Your account has been banned. Please contact an administrator.';
@@ -8,6 +9,11 @@ if (isset($_GET['banned'])) {
 
 if (isset($_GET['logged_out_elsewhere'])) {
     $error = 'Bạn đã bị đăng xuất vì tài khoản này được đăng nhập từ một thiết bị hoặc trình duyệt khác.';
+}
+
+if (isset($_GET['logged_out_elsewhere'])) {
+    $session_notice = 'Tài khoản của bạn đang được đăng nhập từ nơi khác. Phiên đăng nhập cũ đã bị đăng xuất để bảo vệ tài khoản.';
+    $error = '';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -80,6 +86,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <?php require_once 'includes/header.php'; ?>
 <div class="auth-box animate-fade-in">
     <h2><i class="fas fa-right-to-bracket"></i> Login</h2>
+    <?php if ($session_notice): ?>
+        <div class="alert alert-warning session-conflict-notice" style="background:#fff8e6;border:1px solid #ffe0a3;color:#8a5a00;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+            <i class="fas fa-circle-exclamation"></i> <?= htmlspecialchars($session_notice) ?>
+        </div>
+    <?php endif; ?>
     <?php if ($error): ?>
         <div class="alert alert-danger">
             <i class="fas fa-triangle-exclamation"></i> <?= $error ?>

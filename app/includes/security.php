@@ -647,7 +647,7 @@ function enforce_single_session($conn) {
             session_destroy();
             setcookie('remember_token', '', time()-3600, '/');
             
-            header('Location: login.php?logged_out_elsewhere=1');
+            header('Location: /login.php?logged_out_elsewhere=1');
             exit;
         }
     }

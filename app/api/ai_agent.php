@@ -97,6 +97,24 @@ function apply_ai_fix_rule_for_file($conn, $filePath, $admin_id, $summary = null
     return [$event_type, $route];
 }
 
+function mark_security_events_protected($conn, $event_type, $route, $summary, $admin_id) {
+    $safe_type = $conn->real_escape_string($event_type);
+    $safe_route = $conn->real_escape_string($route);
+    $safe_summary = $conn->real_escape_string($summary);
+    $admin_id = (int)$admin_id;
+
+    $conn->query("
+        UPDATE security_events
+        SET ai_fixed_at=COALESCE(ai_fixed_at, NOW()),
+            ai_fix_summary='$safe_summary',
+            resolved_at=COALESCE(resolved_at, NOW()),
+            resolved_by=$admin_id
+        WHERE deleted_at IS NULL
+          AND event_type='$safe_type'
+          AND REPLACE(REPLACE(SUBSTRING_INDEX(COALESCE(request_uri, ''), '?', 1), '///', '/'), '//', '/')='$safe_route'
+    ");
+}
+
 function load_agent_memory_context($conn) {
     $memories = [];
     $res = $conn->query("
@@ -625,6 +643,13 @@ if ($action === 'apply_patch') {
                 $admin_id,
                 'Source patch did not match current code exactly, so ConnectHub Sentinel activated the existing Quick Protect path for this route.'
             );
+            mark_security_events_protected(
+                $conn,
+                $event_type,
+                $route,
+                'Quick Protect activated because the generated source patch did not match the current source file exactly.',
+                $admin_id
+            );
             $safe_file_path = $conn->real_escape_string($filePath);
             $safe_payload = $conn->real_escape_string('Route: ' . $route . '; Type: ' . $event_type);
             $conn->query("
@@ -666,7 +691,8 @@ if ($action === 'apply_patch') {
     ");
 
     $summary = "Source code patch applied directly via ConnectHub Sentinel using Gemini.";
-    apply_ai_fix_rule_for_file($conn, $filePath, $admin_id, $summary);
+    [$event_type, $route] = apply_ai_fix_rule_for_file($conn, $filePath, $admin_id, $summary);
+    mark_security_events_protected($conn, $event_type, $route, $summary, $admin_id);
 
     echo json_encode([
         'success' => true,

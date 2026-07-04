@@ -4,6 +4,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Auto-dismiss alerts with smooth slide-up
     const alerts = document.querySelectorAll('.alert');
     alerts.forEach(function(alert) {
+        if (alert.classList.contains('session-conflict-notice')) return;
+
         setTimeout(function() {
             alert.style.opacity = '0';
             alert.style.transform = 'translateY(-10px)';
@@ -61,4 +63,32 @@ document.addEventListener('DOMContentLoaded', function() {
             button.setAttribute('title', showing ? 'Show password' : 'Hide password');
         });
     });
+
+    // Keep the current tab in sync with the server-side single-session rule.
+    // If the same account logs in elsewhere, this tab is redirected to the login notice.
+    if (!window.__connectHubSessionHeartbeat) {
+        window.__connectHubSessionHeartbeat = true;
+        setInterval(function() {
+            fetch('/api/session_status.php', {
+                cache: 'no-store',
+                credentials: 'same-origin'
+            })
+                .then(function(response) {
+                    if (response.redirected && response.url.indexOf('logged_out_elsewhere=1') !== -1) {
+                        window.location.href = response.url;
+                        return null;
+                    }
+
+                    const contentType = response.headers.get('content-type') || '';
+                    if (contentType.indexOf('application/json') === -1) return null;
+                    return response.json();
+                })
+                .then(function(data) {
+                    if (data && data.status === 'logged_out_elsewhere') {
+                        window.location.href = '/login.php?logged_out_elsewhere=1';
+                    }
+                })
+                .catch(function() {});
+        }, 8000);
+    }
 });

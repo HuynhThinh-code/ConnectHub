@@ -985,6 +985,7 @@ $ai_fix_rules = $conn->query("
                     const sendBtn = document.getElementById('aiChatSend');
 
                     let activePatch = null;
+                    let activeEventContext = null;
 
                     // Toggle chat window open/close
                     toggle.addEventListener('click', () => {
@@ -1182,7 +1183,9 @@ $ai_fix_rules = $conn->query("
                                 action: 'apply_patch',
                                 file_path: activePatch.file_path,
                                 search_code: activePatch.search_code,
-                                replace_code: activePatch.replace_code
+                                replace_code: activePatch.replace_code,
+                                event_type: activeEventContext ? activeEventContext.event_type : '',
+                                route: activeEventContext ? activeEventContext.route : ''
                             })
                         })
                         .then(res => res.json())
@@ -1192,6 +1195,7 @@ $ai_fix_rules = $conn->query("
                                 btn.innerHTML = data.fallback_rule ? '<i class="fas fa-shield-halved"></i> Quick Protect Activated' : '<i class="fas fa-check-double"></i> Patched Successfully!';
                                 appendMessage('bot', '✔️ ' + data.message);
                                 activePatch = null;
+                                activeEventContext = null;
                             } else {
                                 btn.style.background = '#ef4444';
                                 btn.innerHTML = '<i class="fas fa-triangle-exclamation"></i> Patch Failed';
@@ -1391,9 +1395,12 @@ Vui lòng giải thích ngắn gọn lý do vì sao bị lỗi và cung cấp c�
                             <div class="security-event-footer">
                                 <div class="security-event-actions">
                                     <?php if (!$event['ai_fixed_at']): ?>
-                                        <button type="button" class="btn btn-success btn-sm btn-glow" onclick="triggerAiFixForEvent('<?= htmlspecialchars($event['event_type']) ?>', '<?= htmlspecialchars(admin_event_route($event['request_uri'] ?? '')) ?>', '<?= htmlspecialchars(addslashes($event['details'])) ?>', '<?= htmlspecialchars(addslashes(admin_event_payload($event['payload']))) ?>')">
-                                            <i class="fas fa-shield-halved"></i> Quick Protect
-                                        </button>
+                                        <form method="POST" style="display:inline;">
+                                            <input type="hidden" name="id" value="<?= (int)$event['id'] ?>">
+                                            <button name="action" value="ai_fix_event" class="btn btn-success btn-sm btn-glow">
+                                                <i class="fas fa-shield-halved"></i> Quick Protect
+                                            </button>
+                                        </form>
                                         <?php if ($event['event_type'] === 'unknown_attack'): ?>
                                             <button type="button" class="btn btn-secondary btn-sm" onclick="triggerAiLearnUnknown('<?= htmlspecialchars((int)$event['id']) ?>')">
                                                 <i class="fas fa-graduation-cap"></i> Learn Attack
