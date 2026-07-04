@@ -13,12 +13,23 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $me      = (int)$_SESSION['user_id'];
+$idor_ai_fixed = ai_fix_rule_active($conn, 'idor_messages', '/api/send_message.php');
 $to      = isset($_POST['receiver_id']) ? (int)$_POST['receiver_id'] : 0;
 // VULN: content not sanitized = Stored XSS via messenger popup (real-time XSS demo)
 $content = isset($_POST['content']) ? trim($_POST['content']) : '';
 
 if (!$to || $content === '') {
     echo json_encode(['error' => 'missing_params']);
+    exit;
+}
+
+if (!ai_message_access_allowed($conn, $me, $to)) {
+    log_security_event($conn, 'idor_messages', 'high', 'API message send without an accepted friendship', 'to=' . $to);
+}
+
+if ($idor_ai_fixed && !ai_message_access_allowed($conn, $me, $to)) {
+    http_response_code(403);
+    echo json_encode(['error' => 'forbidden_conversation']);
     exit;
 }
 

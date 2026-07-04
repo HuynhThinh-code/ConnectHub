@@ -2,6 +2,7 @@
 require_once 'includes/db.php';
 require_login();
 $xss_ai_fixed = ai_fix_rule_active($conn, 'xss_probe', '/profile.php');
+$private_ai_fixed = ai_fix_rule_active($conn, 'private_disclosure', '/profile.php');
 
 // ===== VULN: IDOR — no authorization check, anyone can view any profile =====
 // http://localhost/profile.php?id=1  → views admin profile
@@ -15,8 +16,19 @@ if (!$result || $result->num_rows === 0) {
 }
 $user = $result->fetch_assoc();
 
+if ($id !== (int)$_SESSION['user_id']) {
+    $private_probe = $conn->query("SELECT id FROM posts WHERE user_id=$id AND is_private=1 LIMIT 1");
+    if ($private_probe && $private_probe->num_rows > 0) {
+        log_security_event($conn, 'private_disclosure', 'high', 'User viewed a profile containing private posts', 'profile_id=' . $id);
+    }
+}
+
 // ===== VULN: Private posts also visible on other users' profiles =====
-$posts = $conn->query("SELECT * FROM posts WHERE user_id = $id ORDER BY created_at DESC");
+if ($private_ai_fixed && $id !== (int)$_SESSION['user_id'] && empty($_SESSION['is_admin'])) {
+    $posts = $conn->query("SELECT * FROM posts WHERE user_id = $id AND is_private=0 AND status='approved' ORDER BY created_at DESC");
+} else {
+    $posts = $conn->query("SELECT * FROM posts WHERE user_id = $id ORDER BY created_at DESC");
+}
 
 // Friend status
 $is_friend = false;

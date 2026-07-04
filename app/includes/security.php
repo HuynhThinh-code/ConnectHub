@@ -426,7 +426,7 @@ function ai_fix_has_code_patch($route, $event_type) {
         '/login.php' => ['sql_injection'],
         '/search.php' => ['sql_injection', 'xss_probe'],
         '/index.php' => ['xss_probe', 'private_disclosure'],
-        '/post.php' => ['xss_probe'],
+        '/post.php' => ['xss_probe', 'private_disclosure'],
         '/profile.php' => ['xss_probe', 'private_disclosure'],
         '/messages.php' => ['xss_probe', 'idor_messages'],
         '/fetch_messages.php' => ['xss_probe', 'idor_messages'],

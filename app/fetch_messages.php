@@ -3,9 +3,17 @@ require_once 'includes/db.php';
 if (!isset($_SESSION['user_id'])) { exit; }
 $me = $_SESSION['user_id'];
 $xss_ai_fixed = ai_fix_rule_active($conn, 'xss_probe', '/fetch_messages.php');
+$idor_ai_fixed = ai_fix_rule_active($conn, 'idor_messages', '/fetch_messages.php');
 
 $to = isset($_GET['to']) ? (int)$_GET['to'] : 0;
 if (!$to) exit;
+if (!ai_message_access_allowed($conn, $me, $to)) {
+    log_security_event($conn, 'idor_messages', 'high', 'User polled messages without an accepted friendship', 'to=' . $to);
+}
+if ($idor_ai_fixed && !ai_message_access_allowed($conn, $me, $to)) {
+    http_response_code(403);
+    exit;
+}
 
 // Mark as read
 $conn->query("UPDATE messages SET is_read=1 WHERE receiver_id=$to AND sender_id=$me");

@@ -3,6 +3,7 @@ require_once 'includes/db.php';
 require_login();
 $me = $_SESSION['user_id'];
 $xss_ai_fixed = ai_fix_rule_active($conn, 'xss_probe', '/post.php');
+$private_ai_fixed = ai_fix_rule_active($conn, 'private_disclosure', '/post.php');
 
 $post_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
@@ -33,6 +34,13 @@ $post = $conn->query("
 ")->fetch_assoc();
 
 if (!$post) die("Post not found");
+if (!empty($post['is_private']) && (int)$post['user_id'] !== (int)$me) {
+    log_security_event($conn, 'private_disclosure', 'high', 'User attempted to view another user private post', 'post_id=' . $post_id);
+}
+if ($private_ai_fixed && !empty($post['is_private']) && (int)$post['user_id'] !== (int)$me && empty($_SESSION['is_admin'])) {
+    http_response_code(403);
+    die("This private post is not available.");
+}
 $comments = $conn->query("
     SELECT c.*, u.username, u.full_name, u.avatar
     FROM comments c JOIN users u ON c.user_id=u.id

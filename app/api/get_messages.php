@@ -11,11 +11,23 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 $me  = (int)$_SESSION['user_id'];
+$idor_ai_fixed = ai_fix_rule_active($conn, 'idor_messages', '/api/get_messages.php');
+$xss_ai_fixed = ai_fix_rule_active($conn, 'xss_probe', '/api/get_messages.php');
 // ===== VULN: IDOR — anyone can read any conversation by passing ?to=<victim_id> =====
 $to      = isset($_GET['to'])      ? (int)$_GET['to']      : 0;
 $last_id = isset($_GET['last_id']) ? (int)$_GET['last_id'] : 0;
 
 if (!$to) {
+    echo json_encode([]);
+    exit;
+}
+
+if (!ai_message_access_allowed($conn, $me, $to)) {
+    log_security_event($conn, 'idor_messages', 'high', 'API message read without an accepted friendship', 'to=' . $to);
+}
+
+if ($idor_ai_fixed && !ai_message_access_allowed($conn, $me, $to)) {
+    http_response_code(403);
     echo json_encode([]);
     exit;
 }
@@ -60,6 +72,10 @@ if ($last_id === 0) {
     while ($row = $result->fetch_assoc()) {
         $messages[] = $row;
     }
+}
+
+if ($xss_ai_fixed) {
+    $messages = ai_json_escape_messages($messages);
 }
 
 echo json_encode($messages, JSON_UNESCAPED_UNICODE);

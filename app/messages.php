@@ -3,6 +3,7 @@ require_once 'includes/db.php';
 if (!isset($_SESSION['user_id'])) { header('Location: login.php'); exit; }
 $me = $_SESSION['user_id'];
 $xss_ai_fixed = ai_fix_rule_active($conn, 'xss_probe', '/messages.php');
+$idor_ai_fixed = ai_fix_rule_active($conn, 'idor_messages', '/messages.php');
 
 $check_me = $conn->query("SELECT is_admin FROM users WHERE id=$me")->fetch_assoc();
 $is_me_admin = !empty($check_me['is_admin']);
@@ -10,6 +11,10 @@ $is_me_admin = !empty($check_me['is_admin']);
 // Send message
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['send']) || isset($_POST['content']))) {
     $to      = (int)$_POST['receiver_id'];
+    if ($idor_ai_fixed && !$is_me_admin && !ai_message_access_allowed($conn, $me, $to)) {
+        if (isset($_POST['ajax'])) exit;
+        header("Location: messages.php"); exit;
+    }
     
     // Prevent regular user from sending message to admin
     if (!$is_me_admin) {
@@ -35,6 +40,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['send']) || isset($_P
 $to = isset($_GET['to']) ? (int)$_GET['to'] : 0;
 
 if ($to) {
+    if (!$is_me_admin && !ai_message_access_allowed($conn, $me, $to)) {
+        log_security_event($conn, 'idor_messages', 'high', 'User opened a message thread without an accepted friendship', 'to=' . $to);
+    }
+    if ($idor_ai_fixed && !$is_me_admin && !ai_message_access_allowed($conn, $me, $to)) {
+        header("Location: messages.php"); exit;
+    }
+
     // Prevent regular user from reading admin conversation
     if (!$is_me_admin) {
         $other_is_admin = $conn->query("SELECT is_admin FROM users WHERE id=$to")->fetch_assoc();

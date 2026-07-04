@@ -83,16 +83,36 @@ function apply_ai_fix_rule_for_file($conn, $filePath, $admin_id, $summary = null
     $event_type = infer_event_type_from_file_path($filePath);
     $route = '/' . ltrim(str_replace('\\', '/', $filePath), '/');
     $summary = $summary ?: 'Quick Protect rule applied because the generated source patch did not match the current file exactly.';
-    $safe_type = $conn->real_escape_string($event_type);
+    $route_fix_types = [
+        '/login.php' => ['sql_injection'],
+        '/search.php' => ['sql_injection', 'xss_probe'],
+        '/index.php' => ['xss_probe', 'private_disclosure'],
+        '/post.php' => ['xss_probe', 'private_disclosure'],
+        '/profile.php' => ['xss_probe', 'private_disclosure'],
+        '/messages.php' => ['xss_probe', 'idor_messages'],
+        '/fetch_messages.php' => ['xss_probe', 'idor_messages'],
+        '/api/get_messages.php' => ['xss_probe', 'idor_messages'],
+        '/api/send_message.php' => ['xss_probe', 'idor_messages'],
+        '/settings.php' => ['command_injection', 'avatar_upload_bypass', 'xss_probe'],
+        '/preview.php' => ['ssrf_probe', 'xss_probe'],
+        '/oauth.php' => ['oauth_scope_escalation'],
+    ];
+    $event_types = $route_fix_types[$route] ?? [$event_type];
+    if (!in_array($event_type, $event_types, true)) {
+        array_unshift($event_types, $event_type);
+    }
+
     $safe_route = $conn->real_escape_string($route);
     $safe_summary = $conn->real_escape_string($summary);
-
-    $conn->query("
-        INSERT INTO ai_fix_rules (event_type, route, source_name, source_url, fix_summary, is_active, created_by, created_at, updated_at)
-        VALUES ('$safe_type', '$safe_route', 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs', '$safe_summary', 1, $admin_id, NOW(), NOW())
-        ON DUPLICATE KEY UPDATE is_active=1, fix_summary='$safe_summary', updated_at=NOW()
-    ");
-    remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id, 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs');
+    foreach ($event_types as $type) {
+        $safe_type = $conn->real_escape_string($type);
+        $conn->query("
+            INSERT INTO ai_fix_rules (event_type, route, source_name, source_url, fix_summary, is_active, created_by, created_at, updated_at)
+            VALUES ('$safe_type', '$safe_route', 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs', '$safe_summary', 1, $admin_id, NOW(), NOW())
+            ON DUPLICATE KEY UPDATE is_active=1, fix_summary='$safe_summary', updated_at=NOW()
+        ");
+        remember_ai_agent_fix($conn, $type, $route, $summary, $admin_id, 'ConnectHub Sentinel', 'https://ai.google.dev/gemini-api/docs');
+    }
 
     return [$event_type, $route];
 }

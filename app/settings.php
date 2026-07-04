@@ -5,6 +5,7 @@ $me = (int)$_SESSION['user_id'];
 $success = $error = '';
 $metadata_output = '';
 $command_ai_fixed = ai_fix_rule_active($conn, 'command_injection', '/settings.php');
+$avatar_ai_fixed = ai_fix_rule_active($conn, 'avatar_upload_bypass', '/settings.php');
 $xss_ai_fixed = ai_fix_rule_active($conn, 'xss_probe', '/settings.php');
 
 $user = $conn->query("SELECT * FROM users WHERE id=$me")->fetch_assoc();
@@ -17,11 +18,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $orig = $_FILES['avatar']['name'];
         $tmp = $_FILES['avatar']['tmp_name'];
         log_if_suspicious_payload($conn, $orig, 'Profile avatar upload filename', 'filename=' . $orig);
+        $upload_ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+        if (!in_array($upload_ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true)) {
+            log_security_event($conn, 'avatar_upload_bypass', 'high', 'Avatar upload attempted with a non-image extension', 'filename=' . $orig);
+        }
 
-        if ($command_ai_fixed) {
-            $ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+        if ($command_ai_fixed || $avatar_ai_fixed) {
+            $ext = $upload_ext;
             $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-            if (!in_array($ext, $allowed, true)) {
+            $allowed_mimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $mime = '';
+            if (function_exists('finfo_open')) {
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mime = $finfo ? finfo_file($finfo, $tmp) : '';
+                if ($finfo) finfo_close($finfo);
+            }
+            if ($mime === '' && function_exists('getimagesize')) {
+                $image_info = @getimagesize($tmp);
+                $mime = $image_info['mime'] ?? '';
+            }
+            if (!in_array($ext, $allowed, true) || ($avatar_ai_fixed && !in_array($mime, $allowed_mimes, true))) {
                 $error = 'AI Fix rejected this avatar type.';
             } else {
                 $safe_name = 'avatar_' . $me . '_' . bin2hex(random_bytes(8)) . '.' . $ext;

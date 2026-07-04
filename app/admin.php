@@ -99,7 +99,7 @@ function admin_remember_ai_fix($conn, $event_type, $route, $summary, $admin_id) 
 }
 
 function admin_train_ai_fix_from_events($conn, $admin_id) {
-    $attack_types = "'sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation'";
+    $attack_types = "'sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation','private_disclosure','idor_messages','weak_session','avatar_upload_bypass'";
     $events = $conn->query("
         SELECT event_type, request_uri
         FROM security_events
@@ -154,6 +154,8 @@ function admin_train_ai_fix_from_events($conn, $admin_id) {
         ['xss_probe', '/profile.php'],
         ['xss_probe', '/messages.php'],
         ['xss_probe', '/fetch_messages.php'],
+        ['xss_probe', '/api/get_messages.php'],
+        ['private_disclosure', '/post.php'],
         ['private_disclosure', '/index.php'],
         ['private_disclosure', '/profile.php'],
         ['idor_messages', '/messages.php'],
@@ -498,7 +500,7 @@ $attack_events = $conn->query("
     FROM security_events se
     LEFT JOIN users u ON se.user_id = u.id
     WHERE se.deleted_at IS NULL
-      AND se.event_type IN ('sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation','unknown_attack','learned_attack')
+      AND se.event_type IN ('sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation','private_disclosure','idor_messages','weak_session','avatar_upload_bypass','unknown_attack','learned_attack')
     ORDER BY se.occurred_at DESC, se.id DESC
     LIMIT 120
 ");
