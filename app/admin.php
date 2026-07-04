@@ -98,6 +98,42 @@ function admin_remember_ai_fix($conn, $event_type, $route, $summary, $admin_id) 
     remember_ai_agent_fix($conn, $event_type, $route, $summary, $admin_id);
 }
 
+function admin_apply_related_ai_fix_rules($conn, $event_type, $route, $summary, $admin_id) {
+    $related = [[$event_type, $route]];
+
+    if ($event_type === 'xss_probe' && in_array($route, ['/index.php', '/post.php', '/profile.php'], true)) {
+        $related[] = ['xss_probe', '/index.php'];
+        $related[] = ['xss_probe', '/post.php'];
+        $related[] = ['xss_probe', '/profile.php'];
+    }
+    if (in_array($route, ['/messages.php', '/fetch_messages.php', '/api/get_messages.php', '/api/send_message.php'], true)) {
+        if (in_array($event_type, ['xss_probe', 'idor_messages'], true)) {
+            foreach (['/messages.php', '/fetch_messages.php', '/api/get_messages.php', '/api/send_message.php'] as $message_route) {
+                $related[] = [$event_type, $message_route];
+            }
+        }
+    }
+    if ($route === '/settings.php') {
+        foreach (['command_injection', 'avatar_upload_bypass', 'xss_probe'] as $settings_type) {
+            $related[] = [$settings_type, '/settings.php'];
+        }
+    }
+    if ($route === '/search.php') {
+        $related[] = ['sql_injection', '/search.php'];
+        $related[] = ['xss_probe', '/search.php'];
+    }
+
+    $seen = [];
+    foreach ($related as $rule) {
+        [$type, $target_route] = $rule;
+        $key = $type . '|' . $target_route;
+        if (isset($seen[$key])) continue;
+        $seen[$key] = true;
+        admin_upsert_ai_fix_rule($conn, $type, $target_route, $summary, $admin_id);
+        admin_remember_ai_fix($conn, $type, $target_route, $summary, $admin_id);
+    }
+}
+
 function admin_train_ai_fix_from_events($conn, $admin_id) {
     $attack_types = "'sql_injection','xss_probe','path_traversal','command_injection','ssrf_probe','oauth_scope_escalation','private_disclosure','idor_messages','weak_session','avatar_upload_bypass'";
     $events = $conn->query("
@@ -120,14 +156,10 @@ function admin_train_ai_fix_from_events($conn, $admin_id) {
         admin_upsert_ai_fix_rule($conn, $event['event_type'], $route, $summary, $admin_id);
         admin_remember_ai_fix($conn, $event['event_type'], $route, $summary, $admin_id);
         if ($event['event_type'] === 'xss_probe' && $route === '/index.php') {
-            admin_upsert_ai_fix_rule($conn, 'xss_probe', '/post.php', $summary, $admin_id);
-            admin_upsert_ai_fix_rule($conn, 'xss_probe', '/profile.php', $summary, $admin_id);
-            admin_remember_ai_fix($conn, 'xss_probe', '/post.php', $summary, $admin_id);
-            admin_remember_ai_fix($conn, 'xss_probe', '/profile.php', $summary, $admin_id);
+            admin_apply_related_ai_fix_rules($conn, 'xss_probe', $route, $summary, $admin_id);
         }
         if ($event['event_type'] === 'xss_probe' && $route === '/messages.php') {
-            admin_upsert_ai_fix_rule($conn, 'xss_probe', '/fetch_messages.php', $summary, $admin_id);
-            admin_remember_ai_fix($conn, 'xss_probe', '/fetch_messages.php', $summary, $admin_id);
+            admin_apply_related_ai_fix_rules($conn, 'xss_probe', $route, $summary, $admin_id);
         }
 
         $where = admin_event_group_where($conn, [
@@ -364,8 +396,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     resolved_by=$admin_id
                 WHERE $where
             ");
-            admin_upsert_ai_fix_rule($conn, $event['event_type'], $route, admin_ai_fix_summary($event['event_type']), $admin_id);
-            admin_remember_ai_fix($conn, $event['event_type'], $route, admin_ai_fix_summary($event['event_type']), $admin_id);
+            admin_apply_related_ai_fix_rules($conn, $event['event_type'], $route, admin_ai_fix_summary($event['event_type']), $admin_id);
             $message = 'Quick Protect activated. Duplicate events changed to protected.';
         }
     } elseif ($action === 'train_ai_fix_all') {
