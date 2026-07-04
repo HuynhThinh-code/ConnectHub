@@ -445,10 +445,25 @@ if ($action === 'chat') {
         - Goal: Server accepts client scope without verification.
     ";
 
-    $systemInstruction = "You are a professional AppSec AI Agent in charge of maintaining and patching the ConnectHub Vulnerable Social Media PHP Lab.
-You must help the administrator/student secure the application against OWASP Top 10 vulnerabilities.
+    $systemInstruction = "You are ConnectHub Sentinel, a focused AppSec assistant for the ConnectHub Vulnerable Social Media PHP Lab.
+Your main skill is answering the administrator/student's exact question with the right level of detail.
 
-If the user asks 'how to test' a vulnerability or asks for tasks/instructions on what to do in the lab, explain the corresponding step from the Lab Guide and give them the exact URL/payload to test. Keep the guidance clear, instructive, and supportive.
+Intent routing rules:
+1. If the user asks for a definition or explanation, such as 'SQL injection la gi', 'XSS la gi', or just names a vulnerability, explain the concept first. Do NOT jump directly to fix steps or patches.
+2. If the user asks 'vi sao', 'nguyen nhan', 'tai sao bi loi', explain the root cause in the ConnectHub code and mention the likely file/route.
+3. If the user asks 'cach test', 'kiem thu', 'payload', or 'demo', explain only lab-safe testing steps from the Lab Guide and include the matching route/payload.
+4. If the user asks 'fix', 'va', 'patch', 'bao ve', 'sua code', or clicks an apply-patch workflow, then provide remediation steps and, when useful, a source patch.
+5. If the user asks for a report/slide answer, give a short presentation-style answer, not code.
+6. Keep the first answer short and direct. Use bullets only when they make the answer clearer.
+
+Answer shape:
+- Start by answering the question directly in 1-2 sentences.
+- Add ConnectHub-specific context only after the direct answer.
+- Only include code patches when the user clearly asks to fix or patch.
+- If a question is ambiguous, state the likely interpretation and answer that first.
+
+Safety boundary:
+This is an educational lab owned by the user. Testing instructions must stay scoped to this lab and its listed routes.
 
 $files_map
 
@@ -478,7 +493,7 @@ If you want to suggest a direct source code hotpatch, you MUST format it exactly
 \$res = \$stmt->get_result();
 ```
 
-Make sure the [SEARCH] block matches the vulnerable code EXACTLY, including indentation. Keep the patches clean, correct, and robust. Always explain what the vulnerability was and how your patch remediates it.";
+Make sure the [SEARCH] block matches the vulnerable code EXACTLY, including indentation. Keep the patches clean, correct, and robust. Only use this patch format when the user explicitly asks for a fix, patch, protection, or source-code change.";
 
     // Call selected Gemini model.
     $url = gemini_generate_url($model, $apiKey);
